@@ -5,20 +5,40 @@ import {
 } from "@opentui/core";
 import { Slack, Demo, channelName, displayText, messageText, isSidebarActive, type Channel, type Message } from "./slack";
 import { ChannelSelect } from "./channel-select";
+import { isUserToken, tokenProvider } from "./oauth";
+import { fileURLToPath } from "node:url";
 
 const demo = process.argv.includes("--demo");
 const token = process.env.SLACK_USER_TOKEN;
-if (!demo && !token?.startsWith("xoxp-")) {
+if (!demo && (!token || !isUserToken(token))) {
   console.error("Set SLACK_USER_TOKEN to your xoxp- user OAuth token in .env.\nSee README.md for setup, or run: bun run demo");
   process.exit(1);
 }
-const chat = demo ? new Demo() : new Slack(token!);
+const chat = demo ? new Demo() : new Slack(tokenProvider({
+  token: token!, clientId: process.env.SLACK_CLIENT_ID, refreshToken: process.env.SLACK_REFRESH_TOKEN,
+  expiresAt: process.env.SLACK_TOKEN_EXPIRES_AT ? Number(process.env.SLACK_TOKEN_EXPIRES_AT) : undefined,
+}, fileURLToPath(new URL("../.env", import.meta.url))));
 const renderer = await createCliRenderer({ exitOnCtrlC: true });
 const root = new BoxRenderable(renderer, { width: "100%", height: "100%", flexDirection: "column", backgroundColor: "#191724" });
 renderer.root.add(root);
 const title = new TextRenderable(renderer, { content: " slack-tui · Connecting…", height: 1, fg: "#c4a7e7" });
 root.add(title);
-const body = new BoxRenderable(renderer, { flexDirection: "row", flexGrow: 1, minHeight: 0 });
+const body = new BoxRenderable(renderer, {
+  flexDirection: "row", flexGrow: 1, minHeight: 0,
+  onMouseDown(event) {
+    if (event.button !== 0 || (event.x !== sidebar.x + sidebar.width - 1 && event.x !== pane.x)) return;
+    dragStart = { x: event.x, width: sidebar.width };
+    event.stopPropagation();
+  },
+  onMouseDrag(event) {
+    if (!dragStart) return;
+    preferredSidebarWidth = dragStart.width + event.x - dragStart.x;
+    resizeSidebar();
+    event.stopPropagation();
+  },
+  onMouseUp() { finishDrag(); },
+  onMouseDragEnd() { finishDrag(); },
+});
 root.add(body);
 const sidebar = new BoxRenderable(renderer, { width: 28, flexShrink: 0, border: true, title: "Conversations", borderColor: "#524f67" });
 body.add(sidebar);
@@ -31,34 +51,16 @@ sidebar.add(menu);
 let preferredSidebarWidth = 28;
 let dragStart: { x: number; width: number } | undefined;
 function resizeSidebar() {
-  const available = Math.max(0, body.width - 1);
+  const available = Math.max(0, body.width);
   const minimum = Math.min(18, Math.floor(available / 3));
   const maximum = Math.max(minimum, available - Math.min(30, Math.floor(available * 2 / 3)));
   sidebar.width = Math.max(minimum, Math.min(maximum, preferredSidebarWidth));
 }
-const divider = new BoxRenderable(renderer, {
-  width: 1, flexShrink: 0, backgroundColor: "#524f67",
-  onMouseDown(event) {
-    if (event.button !== 0) return;
-    dragStart = { x: event.x, width: sidebar.width };
-    divider.backgroundColor = "#c4a7e7";
-    event.stopPropagation();
-  },
-  onMouseDrag(event) {
-    if (!dragStart) return;
-    preferredSidebarWidth = dragStart.width + event.x - dragStart.x;
-    resizeSidebar();
-    event.stopPropagation();
-  },
-  onMouseUp() { finishDrag(); },
-  onMouseDragEnd() { finishDrag(); },
-});
 function finishDrag() {
+  if (!dragStart) return;
   dragStart = undefined;
   preferredSidebarWidth = sidebar.width;
-  divider.backgroundColor = "#524f67";
 }
-body.add(divider);
 body.on("resize", resizeSidebar);
 const pane = new BoxRenderable(renderer, { flexGrow: 1, minWidth: 0, flexDirection: "column", border: true, borderColor: "#524f67" });
 body.add(pane);

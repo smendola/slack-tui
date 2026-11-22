@@ -25,7 +25,7 @@ export interface Chat {
 export class Slack implements Chat {
   users = new Map<string, string>();
   private blockedUntil = new Map<string, number>();
-  constructor(private token: string) {}
+  constructor(private token: string | (() => Promise<string>)) {}
 
   private async call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     const wait = Math.ceil(((this.blockedUntil.get(method) ?? 0) - Date.now()) / 1000);
@@ -35,9 +35,10 @@ export class Slack implements Chat {
     if (!write) {
       for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
     }
+    const token = typeof this.token === "function" ? await this.token() : this.token;
     const response = await fetch(url, {
       method: write ? "POST" : "GET",
-      headers: { Authorization: `Bearer ${this.token}`, "Content-Type": "application/json; charset=utf-8" },
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
       body: write ? JSON.stringify(params) : undefined,
       signal: AbortSignal.timeout(20_000),
     });

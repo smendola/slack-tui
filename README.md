@@ -14,6 +14,47 @@ The offline demo uses in-memory data and never calls Slack.
 
 ## Connect your workspace
 
+### Automated app creation and OAuth
+
+Run this on the same machine as your browser:
+
+```sh
+bun run setup
+```
+
+The wizard:
+
+1. Opens Slack's app settings. Under **Your App Configuration Tokens**, generate
+   an **access token** for your workspace and paste it into the hidden prompt.
+   This is a configuration token, not the refresh token or a chat user token.
+2. Starts a callback listener bound to loopback on a randomly allocated port.
+3. Creates your own Slack app using `slack-app.yaml`, enabling PKCE and registering
+   `http://localhost:PORT/oauth/callback` as the redirect URL.
+4. Opens Slack's authorization page so you can approve the requested user permissions.
+5. Exchanges the authorization code, verifies the resulting user token and scopes,
+   and saves it in `.env` with owner-only permissions. Other `.env` settings are preserved.
+6. Stops the callback server. Run `bun start`.
+
+No Cloudflare, Tailscale, custom domain, HTTPS server or public tunnel is needed.
+[Slack's PKCE flow](https://docs.slack.dev/authentication/using-pkce/) allows HTTP
+localhost redirects for desktop clients requesting user scopes.
+The configuration token and PKCE verifier stay in memory. The app client secret
+is neither used nor saved. State validation and PKCE protect the OAuth callback.
+The wizard does not serve local files or expose the chat client.
+
+If Slack issues an expiring user token, its refresh token, expiry and client ID
+are also saved in `.env`. The client refreshes before expiry during use and
+persists replacement credentials. Slack's PKCE refresh tokens expire after
+30 days; if refresh is no longer possible, run setup again.
+
+An existing connection is left alone unless you run `bun run setup --replace`.
+Each run creates a new app. If authorization is cancelled, times out (15 minutes),
+or requires administrator approval, the created app remains in Slack; the wizard
+prints its settings URL for manual installation or deletion. Existing credentials
+are replaced only after successful authorization and verification.
+
+### Manual installation
+
 1. Open https://api.slack.com/apps and choose **Create New App → From a manifest**.
 2. Select your workspace and paste the contents of `slack-app.yaml`.
 3. Create the app, then open **OAuth & Permissions → Install to Workspace**.
@@ -23,8 +64,8 @@ The offline demo uses in-memory data and never calls Slack.
 6. Run `bun start`. Bun loads `.env` automatically.
 
 The token remains local and `.env` is gitignored. Each person using a different
-workspace should create their own app registration. This POC doesn't need a
-server, Socket Mode, a bot, or a public OAuth callback.
+workspace should create their own app registration. Normal chat use needs no
+server, Socket Mode, or bot. Only the automated setup temporarily runs an OAuth callback.
 
 ## Controls
 
@@ -35,7 +76,7 @@ server, Socket Mode, a bot, or a public OAuth callback.
 | Ctrl+D | Switch sidebar between channels and 1:1 direct messages |
 | Ctrl+L | Toggle active-only / all conversations |
 | Mouse wheel over sidebar | Move through conversations |
-| Drag the divider between panes | Resize sidebar and chat |
+| Drag either adjoining vertical pane border | Resize sidebar and chat |
 | Tab | Switch between sidebar and composer |
 | Enter in composer | Send as yourself |
 | Shift+Enter in composer | Expand to the chat pane and insert a newline |

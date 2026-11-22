@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "bun src/index.ts",
+    "setup": "bun src/setup.ts",
     "demo": "bun src/index.ts --demo",
     "check": "tsc --noEmit",
     "test": "bun test"
