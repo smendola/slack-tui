@@ -1,137 +1,128 @@
 # slack-tui
 
-A tiny Bun + OpenTUI Slack client: conversations on the left, recent messages
-and an expandable composer on the right. Uses your own Slack **user** OAuth token.
+A Slack chat client for your terminal, written in TypeScript with
+[Bun](https://bun.sh) and [OpenTUI](https://github.com/anomalyco/opentui).
 
-## Try it without Slack
+Browse channels and DMs, send messages as yourself, and paste images with captions.
+The interface includes user avatars, a draggable pane split, and an expandable
+multiline composer.
+
+## Getting started
+
+Install Bun, then:
 
 ```sh
+git clone https://github.com/smendola/slack-tui.git
+cd slack-tui
 bun install
+```
+
+Try the offline demo:
+
+```sh
 bun run demo
 ```
 
-The offline demo uses in-memory data and never calls Slack.
+The demo uses in-memory conversations and never calls Slack.
 
-## Connect your workspace
+## Connect to Slack
 
-### Automated app creation and OAuth
+Each workspace uses its own Slack app registration. The setup wizard creates
+that app for you; your workspace may require administrator approval.
 
-Run this on the same machine as your browser:
+Run setup on the same machine as your browser:
 
 ```sh
 bun run setup
 ```
 
-The wizard:
+1. The wizard opens [Slack's app settings](https://api.slack.com/apps).
+2. Below the app list, find **Your App Configuration Tokens**, click
+   **Generate Token**, and select your workspace.
+3. Copy the configuration **access token**—not the refresh token—and paste it
+   into the terminal's hidden prompt.
+4. The wizard creates the app and opens Slack's authorization page. Approve
+   the requested permissions.
+5. Your user token is verified and saved to `.env`. Start chatting:
 
-1. Opens Slack's app settings. Under **Your App Configuration Tokens**, generate
-   an **access token** for your workspace and paste it into the hidden prompt.
-   This is a configuration token, not the refresh token or a chat user token.
-2. Starts a callback listener bound to loopback on a randomly allocated port.
-3. Creates your own Slack app using `slack-app.yaml`, enabling PKCE and registering
-   `http://localhost:PORT/oauth/callback` as the redirect URL.
-4. Opens Slack's authorization page so you can approve the requested user permissions.
-5. Exchanges the authorization code, verifies the resulting user token and scopes,
-   and saves it in `.env` with owner-only permissions. Other `.env` settings are preserved.
-6. Stops the callback server. Run `bun start`.
+   ```sh
+   bun start
+   ```
 
-No Cloudflare, Tailscale, custom domain, HTTPS server or public tunnel is needed.
-[Slack's PKCE flow](https://docs.slack.dev/authentication/using-pkce/) allows HTTP
-localhost redirects for desktop clients requesting user scopes.
-The configuration token and PKCE verifier stay in memory. The app client secret
-is neither used nor saved. State validation and PKCE protect the OAuth callback.
-The wizard does not serve local files or expose the chat client.
+Setup uses OAuth with PKCE and a temporary localhost callback. The configuration
+token is not saved. `.env` is gitignored and written with owner-only permissions.
+If Slack issues expiring credentials, the client saves and refreshes them automatically.
+If authorization expires and refresh is no longer possible, run setup again.
 
-If Slack issues an expiring user token, its refresh token, expiry and client ID
-are also saved in `.env`. The client refreshes before expiry during use and
-persists replacement credentials. Slack's PKCE refresh tokens expire after
-30 days; if refresh is no longer possible, run setup again.
+To replace an existing connection, use `bun run setup --replace`. Each setup run
+creates a new app. If setup is interrupted after app creation, it prints the
+app's settings URL so you can finish installation manually or delete it before
+retrying. Existing credentials are replaced only after successful authorization.
 
-An existing connection is left alone unless you run `bun run setup --replace`.
-Each run creates a new app. If authorization is cancelled, times out (15 minutes),
-or requires administrator approval, the created app remains in Slack; the wizard
-prints its settings URL for manual installation or deletion. Existing credentials
-are replaced only after successful authorization and verification.
+### Manual setup
 
-### Manual installation
-
-1. Open https://api.slack.com/apps and choose **Create New App → From a manifest**.
+1. Open [Slack's app settings](https://api.slack.com/apps) and choose
+   **Create New App → From a manifest**.
 2. Select your workspace and paste the contents of `slack-app.yaml`.
-3. Create the app, then open **OAuth & Permissions → Install to Workspace**.
-   Your workspace may require an administrator's approval.
+3. Create the app, then select **OAuth & Permissions → Install to Workspace**.
 4. Copy the **User OAuth Token** (`xoxp-…`), not a bot token.
 5. Copy `.env.example` to `.env` and replace the placeholder with your token.
-6. Run `bun start`. Bun loads `.env` automatically.
-
-The token remains local and `.env` is gitignored. Each person using a different
-workspace should create their own app registration. Normal chat use needs no
-server, Socket Mode, or bot. Only the automated setup temporarily runs an OAuth callback.
+6. Run `bun start`.
 
 ## Controls
 
-| Key | Action |
+| Key / gesture | Action |
 | --- | --- |
 | Up / Down, then Enter | Choose and open a conversation |
-| Left click a conversation | Open it |
-| Ctrl+D | Switch sidebar between channels and 1:1 direct messages |
+| Click a conversation | Open it |
+| Ctrl+D | Switch between channels/group DMs and 1:1 DMs |
 | Ctrl+L | Toggle active-only / all conversations |
 | Mouse wheel over sidebar | Move through conversations |
 | Drag either adjoining vertical pane border | Resize sidebar and chat |
 | Tab | Switch between sidebar and composer |
-| Enter in composer | Send as yourself |
-| Ctrl+V in composer | Paste an image from the local clipboard, or text if no image is available |
+| Enter in composer | Send message and attached image |
+| Ctrl+V in composer | Paste a clipboard image or text |
 | Ctrl+G / click Remove image | Remove the attached image |
-| Shift+Enter in composer | Expand to the chat pane and insert a newline |
-| Double-click composer | Expand to the chat pane |
-| Escape | Collapse composer, keeping the draft |
+| Shift+Enter in composer | Expand the composer and insert a newline |
+| Double-click composer | Expand the composer |
+| Escape | Collapse the composer, keeping the draft |
 | Page Up / Page Down or mouse wheel | Scroll messages |
 | Ctrl+R | Refresh the current conversation |
 | Ctrl+C | Quit |
 
-## Deliberately small scope
-
-- Lists joined channels, private channels and existing DMs/group DMs.
-- Loads the latest 50 messages (Slack may return fewer).
-- Sends plain text, including Slack formatting syntax.
-- Attaches one clipboard PNG, JPEG, WebP or GIF (up to 20 MiB), with a preview
-  and optional caption. Images stay in per-conversation drafts until sent or removed.
-- Resolves user mentions and common Slack link syntax for display.
-- Labels group DMs with their custom Slack name, or participant display names.
-- Displays legacy bot attachment text, fields and links (including Codemagic builds).
-- Preserves drafts when switching conversations and when a send fails.
-- Shows API errors and respects Slack's `Retry-After` response.
-
-Incoming messages require **Ctrl+R**; there is no background polling.
 Shift+Enter requires a terminal that reports modified Enter keys. Double-click
-expands the editor independently of that keyboard support. Sending collapses
-the editor when the sent draft has not been edited while sending.
-The sidebar defaults to an approximate active-only view: Slack's dormant flag
-and explicitly closed DMs are hidden. Missing metadata stays visible, as does
-the currently open conversation. Ctrl+L reveals all loaded conversations.
-This does not synchronize Slack GUI filters, muted channels or custom sections;
-activity metadata is loaded at startup.
-Message formatting is currently readable text, not styled Markdown.
-No incoming-image rendering, thread navigation, older-history pagination, reactions, search,
-read-state updates or persistent cache yet. Attachments are shown by filename.
+can also expand the composer. Sending collapses it unless you've edited the
+draft while the send was in progress.
 
-### Image paste setup
+## Images and avatars
 
-New app installations request `files:write` automatically. For an existing app,
-open **OAuth & Permissions → User Token Scopes**, add **files:write**, then
-reinstall/reauthorize the app. Update your local token if Slack issues a new one.
-Alternatively, `bun run setup --replace` creates and authorizes a new app with
-the updated manifest.
+Focus the composer and press **Ctrl+V** to attach a clipboard image. Add an
+optional caption, then press **Enter** to send both. One PNG, JPEG, WebP or GIF
+up to 20 MiB can be attached at a time; pasting another image replaces it.
+Text and image drafts are kept when switching conversations or when a send fails.
 
-Focus the composer and press **Ctrl+V**. An image preview and filename appear;
-type a caption if desired, then press **Enter**. Pasting another image replaces
-the pending attachment. **Ctrl+G** or **Remove image** removes it. Upload errors
-keep the draft; an uncertain completion should be checked in Slack before retrying.
-The demo exercises the same composer without uploading to Slack.
+Clipboard access is local to the machine running slack-tui. It does not read
+your laptop's clipboard when running over SSH. Terminal paste shortcuts such as
+Ctrl+Shift+V generally deliver text rather than images.
 
-This reads the clipboard of the machine running slack-tui, not a remote SSH
-client's clipboard. Terminal paste shortcuts (such as Ctrl+Shift+V) still paste
-text normally but generally do not deliver image data. Preview quality depends
-on terminal graphics support; unsupported terminals use a block-image fallback.
+Avatars appear beside message headers, with initials as a fallback. Image quality
+depends on terminal graphics support; other terminals use a block-image fallback.
+Incoming image attachments are currently listed by filename.
+
+## Current limitations
+
+- **Refresh is manual:** press Ctrl+R to fetch incoming messages.
+- **Recent history only:** loads up to 50 messages per conversation.
+- **Basic formatting:** resolves mentions, links and bot attachment details,
+  but does not yet render styled Markdown.
+- **Approximate active-only sidebar:** hides conversations Slack marks dormant
+  and explicitly closed DMs. Ctrl+L reveals all loaded conversations. Activity
+  metadata is loaded at startup; custom sections and muted preferences aren't synced.
+- No thread navigation, reactions, search, read-state updates or persistent
+  message cache yet.
+
+If a send reports an uncertain delivery, check Slack before retrying to avoid
+posting a duplicate.
 
 ## Development
 

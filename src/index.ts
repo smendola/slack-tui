@@ -8,6 +8,7 @@ import { ChannelSelect } from "./channel-select";
 import { isUserToken, tokenProvider } from "./oauth";
 import { fileURLToPath } from "node:url";
 import { clipboardImage, MAX_IMAGE_BYTES, type ImageAttachment } from "./attachment";
+import { AvatarCache } from "./avatars";
 
 const demo = process.argv.includes("--demo");
 const token = process.env.SLACK_USER_TOKEN;
@@ -74,8 +75,21 @@ const heading = new TextRenderable(renderer, { content: "Select a conversation",
 chatSection.add(heading);
 const scroll = new ScrollBoxRenderable(renderer, { flexGrow: 1, minHeight: 0, scrollX: false, stickyScroll: true, stickyStart: "bottom" });
 chatSection.add(scroll);
-const messages = new TextRenderable(renderer, { width: "100%", content: "", fg: "#e0def4", flexShrink: 0, wrapMode: "word" });
+const messages = new BoxRenderable(renderer, { width: "100%", flexDirection: "column", flexShrink: 0 });
 scroll.add(messages);
+const avatarCache = new AvatarCache();
+let messageRenderVersion = 0;
+function clearMessages() {
+  messageRenderVersion++;
+  for (const child of [...messages.getChildren()]) {
+    messages.remove(child);
+    child.destroyRecursively();
+  }
+}
+function showMessageStatus(content: string) {
+  clearMessages();
+  messages.add(new TextRenderable(renderer, { content, fg: "#e0def4" }));
+}
 const composerSection = new BoxRenderable(renderer, {
   flexDirection: "column", flexShrink: 0, border: true, borderColor: "#524f67",
   customBorderChars: { ...BorderChars.single, topLeft: "├", topRight: "┤" },
@@ -205,16 +219,44 @@ async function pasteClipboard() {
   finally { readingClipboard = false; }
 }
 function renderMessages() {
-  messages.content = currentMessages.length ? new StyledText(currentMessages.flatMap((message, index) => {
-    const name = chat.users.get(message.user ?? "") ?? message.user ?? message.bot_id ?? "Slack";
+  clearMessages();
+  const version = messageRenderVersion;
+  if (!currentMessages.length) { showMessageStatus("No messages yet."); return; }
+  for (const message of currentMessages) {
+    const name = displayText(message.username || chat.users.get(message.user ?? "") || message.bot_profile?.name || message.user || message.bot_id || "Slack", chat.users);
     const time = new Date(Number(message.ts) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const files = message.files?.map(file => `[file: ${file.name ?? "attachment"}]`).join("\n");
-    return [
-      fg("#e0def4")(index ? "\n\n" : ""),
-      bg("#444444")(fg("#b8b8b8")(` ${displayText(name, chat.users)}  ${time} `)),
-      fg("#e0def4")(`\n${messageText(message, chat.users)}${files ? `\n${files}` : ""}${message.reply_count ? `\n↳ ${message.reply_count} replies (not loaded)` : ""}`),
-    ];
-  })) : "No messages yet.";
+    const row = new BoxRenderable(renderer, { width: "100%", flexDirection: "row", flexShrink: 0, minHeight: 2, marginBottom: 1, columnGap: 1 });
+    const avatarColumn = new BoxRenderable(renderer, { width: 4, height: 2, flexShrink: 0 });
+    const initials = name.trim().split(/\s+/).slice(0, 2).map(part => Array.from(part)[0] ?? "").join("").toUpperCase();
+    const fallback = new TextRenderable(renderer, { content: initials, width: 4, height: 2, fg: "#b8b8b8", bg: "#403d52" });
+    avatarColumn.add(fallback);
+    row.add(avatarColumn);
+    const textColumn = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, flexBasis: 0, minWidth: 0 });
+    textColumn.add(new TextRenderable(renderer, {
+      width: "100%", flexShrink: 0, wrapMode: "word",
+      content: new StyledText([bg("#444444")(fg("#b8b8b8")(` ${name}  ${time} `))]),
+    }));
+    textColumn.add(new TextRenderable(renderer, {
+      width: "100%", flexShrink: 0, fg: "#e0def4", wrapMode: "word",
+      content: `${messageText(message, chat.users)}${files ? `\n${files}` : ""}${message.reply_count ? `\n↳ ${message.reply_count} replies (not loaded)` : ""}`,
+    }));
+    row.add(textColumn);
+    messages.add(row);
+    const url = message.icons?.image_48 || message.bot_profile?.icons?.image_72 || message.bot_profile?.icons?.image_48 || chat.avatars.get(message.user ?? "");
+    if (url) {
+      void avatarCache.get(url).then(bytes => {
+        if (!bytes || closed || version !== messageRenderVersion) return;
+        const avatar = new ImageRenderable(renderer, {
+          width: 4, height: 2, position: "absolute", top: 0, left: 0, fit: "cover",
+          onLoad: () => { if (!closed && version === messageRenderVersion) fallback.visible = false; },
+          onError: () => { if (!closed && version === messageRenderVersion) fallback.visible = true; },
+        });
+        avatarColumn.add(avatar);
+        avatar.source = bytes;
+      });
+    }
+  }
 }
 async function load(channel: Channel) {
   if (closed) return;
@@ -229,7 +271,7 @@ async function load(channel: Channel) {
   heading.content = channelName(channel, chat.users);
   composer.placeholder = `Message ${channelName(channel, chat.users).replace(/^[#@🔒]\s+/u, "")}`;
   currentMessages = [];
-  messages.content = "Loading…";
+  showMessageStatus("Loading…");
   const request = ++generation;
   report("Loading recent messages…");
   try {
@@ -241,7 +283,7 @@ async function load(channel: Channel) {
     report(`${result.length} recent messages · Refresh with Ctrl+R`);
   } catch (error) {
     if (closed || request !== generation) return;
-    messages.content = "Unable to load history. Ctrl+R to retry.";
+    showMessageStatus("Unable to load history. Ctrl+R to retry.");
     report(String(error));
   }
 }

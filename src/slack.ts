@@ -7,6 +7,8 @@ export type Channel = {
 };
 export type Message = {
   ts: string; text?: string; user?: string; bot_id?: string;
+  username?: string; icons?: { image_48?: string };
+  bot_profile?: { name?: string; icons?: { image_48?: string; image_72?: string } };
   reply_count?: number; files?: { name?: string }[];
   attachments?: {
     pretext?: string; author_name?: string; title?: string; title_link?: string;
@@ -15,9 +17,10 @@ export type Message = {
     actions?: { text?: string; url?: string }[];
   }[];
 };
-type User = { id: string; name: string; profile?: { display_name?: string; real_name?: string } };
+type User = { id: string; name: string; profile?: { display_name?: string; real_name?: string; image_48?: string; image_72?: string } };
 export interface Chat {
   users: Map<string, string>;
+  avatars: Map<string, string>;
   connect(): Promise<{ team: string; user: string }>;
   channels(): Promise<Channel[]>;
   history(channel: string): Promise<Message[]>;
@@ -26,6 +29,7 @@ export interface Chat {
 
 export class Slack implements Chat {
   users = new Map<string, string>();
+  avatars = new Map<string, string>();
   private blockedUntil = new Map<string, number>();
   private userId?: string;
   constructor(private token: string | (() => Promise<string>)) {}
@@ -79,6 +83,8 @@ export class Slack implements Chat {
       const name = user.profile?.display_name || user.profile?.real_name || user.name;
       this.users.set(user.id, name);
       this.users.set(user.name, name);
+      const avatar = user.profile?.image_72 || user.profile?.image_48;
+      if (avatar) this.avatars.set(user.id, avatar);
     }
     return auth;
   }
@@ -95,6 +101,8 @@ export class Slack implements Chat {
         const name = user.profile?.display_name || user.profile?.real_name || user.name;
         this.users.set(user.id, name);
         if (user.name) this.users.set(user.name, name);
+        const avatar = user.profile?.image_72 || user.profile?.image_48;
+        if (avatar) this.avatars.set(user.id, avatar);
       } catch {
         // Keep the conversation accessible under its ID if a profile is unavailable.
       }
@@ -188,6 +196,7 @@ export function messageText(message: Message, users: Map<string, string>) {
 
 export class Demo implements Chat {
   users = new Map([["alice", "Alice"], ["you", "You"]]);
+  avatars = new Map<string, string>();
   private messages = new Map<string, Message[]>([
     ["general", [
       { ts: "1770000000", user: "alice", text: "Welcome to slack-tui! Channels on the left, messages on the right." },
