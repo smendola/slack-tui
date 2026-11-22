@@ -1,7 +1,7 @@
 import {
   BoxRenderable, TextRenderable, ScrollBoxRenderable,
   SelectRenderableEvents, TextareaRenderable, createCliRenderer,
-  StyledText, bg, fg, ImageRenderable, createHostClipboard, type HostClipboardService,
+  StyledText, bg, fg, BorderChars, ImageRenderable, createHostClipboard, type HostClipboardService,
 } from "@opentui/core";
 import { Slack, Demo, channelName, displayText, messageText, isSidebarActive, type Channel, type Message } from "./slack";
 import { ChannelSelect } from "./channel-select";
@@ -63,14 +63,24 @@ function finishDrag() {
   preferredSidebarWidth = sidebar.width;
 }
 body.on("resize", resizeSidebar);
-const pane = new BoxRenderable(renderer, { flexGrow: 1, minWidth: 0, flexDirection: "column", border: true, borderColor: "#524f67" });
+const pane = new BoxRenderable(renderer, { flexGrow: 1, minWidth: 0, flexDirection: "column" });
 body.add(pane);
+const chatSection = new BoxRenderable(renderer, {
+  flexGrow: 1, minHeight: 2, flexDirection: "column",
+  border: ["top", "left", "right"], borderColor: "#524f67",
+});
+pane.add(chatSection);
 const heading = new TextRenderable(renderer, { content: "Select a conversation", height: 1, fg: "#9ccfd8" });
-pane.add(heading);
+chatSection.add(heading);
 const scroll = new ScrollBoxRenderable(renderer, { flexGrow: 1, minHeight: 0, scrollX: false, stickyScroll: true, stickyStart: "bottom" });
-pane.add(scroll);
+chatSection.add(scroll);
 const messages = new TextRenderable(renderer, { width: "100%", content: "", fg: "#e0def4", flexShrink: 0, wrapMode: "word" });
 scroll.add(messages);
+const composerSection = new BoxRenderable(renderer, {
+  flexDirection: "column", flexShrink: 0, border: true, borderColor: "#524f67",
+  customBorderChars: { ...BorderChars.single, topLeft: "├", topRight: "┤" },
+});
+pane.add(composerSection);
 const attachmentBox = new BoxRenderable(renderer, {
   width: "100%", height: 7, flexShrink: 0, flexDirection: "row", visible: false, backgroundColor: "#26233a",
 });
@@ -87,12 +97,12 @@ attachmentDetails.add(new TextRenderable(renderer, {
   content: "[Remove image]  Ctrl+G", fg: "#9ccfd8", height: 1,
   onMouseDown(event) { if (event.button === 0) { removeImage(); event.stopPropagation(); } },
 }));
-pane.add(attachmentBox);
+composerSection.add(attachmentBox);
 let composerExpanded = false;
 let lastComposerClick: { time: number; x: number; y: number } | undefined;
 const composer = new TextareaRenderable(renderer, {
   width: "100%", height: 1, flexShrink: 0, minHeight: 1,
-  placeholder: "Message…", backgroundColor: "#26233a", focusedBackgroundColor: "#403d52",
+  placeholder: "Message…", backgroundColor: "#191724", focusedBackgroundColor: "#191724",
   keyBindings: [{ name: "return", action: "submit" }],
   onSubmit: () => { void sendMessage(); },
   onMouseDown(event) {
@@ -107,10 +117,13 @@ const composer = new TextareaRenderable(renderer, {
     }
   },
 });
-pane.add(composer);
+composerSection.add(composer);
 function setComposerExpanded(expanded: boolean) {
   composerExpanded = expanded;
   scroll.visible = !expanded;
+  chatSection.flexGrow = expanded ? 0 : 1;
+  composerSection.flexGrow = expanded ? 1 : 0;
+  composerSection.border = expanded ? ["left", "right", "bottom"] : true;
   composer.height = expanded ? "auto" : 1;
   composer.flexGrow = expanded ? 1 : 0;
   if (expanded) composer.focus();
@@ -214,6 +227,7 @@ async function load(channel: Channel) {
   updateAttachment();
   if (changedChannel) setComposerExpanded(composer.plainText.includes("\n"));
   heading.content = channelName(channel, chat.users);
+  composer.placeholder = `Message ${channelName(channel, chat.users).replace(/^[#@🔒]\s+/u, "")}`;
   currentMessages = [];
   messages.content = "Loading…";
   const request = ++generation;
