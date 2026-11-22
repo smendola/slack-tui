@@ -79,6 +79,8 @@ server, Socket Mode, or bot. Only the automated setup temporarily runs an OAuth 
 | Drag either adjoining vertical pane border | Resize sidebar and chat |
 | Tab | Switch between sidebar and composer |
 | Enter in composer | Send as yourself |
+| Ctrl+V in composer | Paste an image from the local clipboard, or text if no image is available |
+| Ctrl+G / click Remove image | Remove the attached image |
 | Shift+Enter in composer | Expand to the chat pane and insert a newline |
 | Double-click composer | Expand to the chat pane |
 | Escape | Collapse composer, keeping the draft |
@@ -91,6 +93,8 @@ server, Socket Mode, or bot. Only the automated setup temporarily runs an OAuth 
 - Lists joined channels, private channels and existing DMs/group DMs.
 - Loads the latest 50 messages (Slack may return fewer).
 - Sends plain text, including Slack formatting syntax.
+- Attaches one clipboard PNG, JPEG, WebP or GIF (up to 20 MiB), with a preview
+  and optional caption. Images stay in per-conversation drafts until sent or removed.
 - Resolves user mentions and common Slack link syntax for display.
 - Labels group DMs with their custom Slack name, or participant display names.
 - Displays legacy bot attachment text, fields and links (including Codemagic builds).
@@ -107,8 +111,27 @@ the currently open conversation. Ctrl+L reveals all loaded conversations.
 This does not synchronize Slack GUI filters, muted channels or custom sections;
 activity metadata is loaded at startup.
 Message formatting is currently readable text, not styled Markdown.
-No images, thread navigation, older-history pagination, reactions, search,
+No incoming-image rendering, thread navigation, older-history pagination, reactions, search,
 read-state updates or persistent cache yet. Attachments are shown by filename.
+
+### Image paste setup
+
+New app installations request `files:write` automatically. For an existing app,
+open **OAuth & Permissions → User Token Scopes**, add **files:write**, then
+reinstall/reauthorize the app. Update your local token if Slack issues a new one.
+Alternatively, `bun run setup --replace` creates and authorizes a new app with
+the updated manifest.
+
+Focus the composer and press **Ctrl+V**. An image preview and filename appear;
+type a caption if desired, then press **Enter**. Pasting another image replaces
+the pending attachment. **Ctrl+G** or **Remove image** removes it. Upload errors
+keep the draft; an uncertain completion should be checked in Slack before retrying.
+The demo exercises the same composer without uploading to Slack.
+
+This reads the clipboard of the machine running slack-tui, not a remote SSH
+client's clipboard. Terminal paste shortcuts (such as Ctrl+Shift+V) still paste
+text normally but generally do not deliver image data. Preview quality depends
+on terminal graphics support; unsupported terminals use a block-image fallback.
 
 ## Development
 

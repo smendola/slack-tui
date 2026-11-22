@@ -15,6 +15,7 @@ oauth_config:
       - mpim:history
       - users:read
       - chat:write
+      - files:write
 settings:
   org_deploy_enabled: false
   socket_mode_enabled: false

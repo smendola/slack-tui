@@ -1,3 +1,5 @@
+import { type ImageAttachment } from "./attachment";
+
 export type Channel = {
   id: string; name?: string; user?: string; is_im?: boolean; is_mpim?: boolean; is_private?: boolean;
   is_open?: boolean;
@@ -19,18 +21,20 @@ export interface Chat {
   connect(): Promise<{ team: string; user: string }>;
   channels(): Promise<Channel[]>;
   history(channel: string): Promise<Message[]>;
-  send(channel: string, text: string): Promise<Message>;
+  send(channel: string, text: string, image?: ImageAttachment): Promise<Message>;
 }
 
 export class Slack implements Chat {
   users = new Map<string, string>();
   private blockedUntil = new Map<string, number>();
+  private userId?: string;
   constructor(private token: string | (() => Promise<string>)) {}
 
   private async call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     const wait = Math.ceil(((this.blockedUntil.get(method) ?? 0) - Date.now()) / 1000);
     if (wait > 0) throw new Error(`Rate limited: retry ${method} in ${wait}s.`);
-    const write = method === "chat.postMessage";
+    const form = method.startsWith("files.");
+    const write = method === "chat.postMessage" || form;
     const url = new URL(`https://slack.com/api/${method}`);
     if (!write) {
       for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
@@ -38,8 +42,9 @@ export class Slack implements Chat {
     const token = typeof this.token === "function" ? await this.token() : this.token;
     const response = await fetch(url, {
       method: write ? "POST" : "GET",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
-      body: write ? JSON.stringify(params) : undefined,
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": form ? "application/x-www-form-urlencoded" : "application/json; charset=utf-8" },
+      body: form ? new URLSearchParams(Object.entries(params).map(([key, value]) => [key, typeof value === "object" ? JSON.stringify(value) : String(value)]))
+        : write ? JSON.stringify(params) : undefined,
       signal: AbortSignal.timeout(20_000),
     });
     if (response.status === 429) {
@@ -67,7 +72,8 @@ export class Slack implements Chat {
   }
 
   async connect() {
-    const auth = await this.call<{ team: string; user: string }>("auth.test");
+    const auth = await this.call<{ team: string; user: string; user_id: string }>("auth.test");
+    this.userId = auth.user_id;
     const users = await this.pages<User>("users.list", "members");
     for (const user of users) {
       const name = user.profile?.display_name || user.profile?.real_name || user.name;
@@ -99,7 +105,26 @@ export class Slack implements Chat {
     const data = await this.call<{ messages: Message[] }>("conversations.history", { channel, limit: 50 });
     return data.messages.toReversed();
   }
-  async send(channel: string, text: string) {
+  async send(channel: string, text: string, image?: ImageAttachment): Promise<Message> {
+    if (image) {
+      const upload = await this.call<{ upload_url: string; file_id: string }>("files.getUploadURLExternal", {
+        filename: image.filename, length: image.bytes.byteLength,
+      });
+      const url = new URL(upload.upload_url);
+      if (url.protocol !== "https:" || url.hostname !== "files.slack.com") throw new Error("Unexpected Slack upload URL.");
+      // The upload URL is already authorized; never forward our OAuth token.
+      const response = await fetch(url, {
+        method: "POST", headers: { "Content-Type": image.mimeType },
+        body: new Uint8Array(image.bytes), redirect: "error", signal: AbortSignal.timeout(120_000),
+      });
+      if (!response.ok) throw new Error(`Image upload failed: HTTP ${response.status}`);
+      await this.call("files.completeUploadExternal", {
+        files: [{ id: upload.file_id, title: image.filename }],
+        channel_id: channel, ...(text ? { initial_comment: text } : {}),
+      });
+      // Optimistic display only; a refresh replaces this with Slack's message.
+      return { ts: String(Date.now() / 1000), user: this.userId, text, files: [{ name: image.filename }] };
+    }
     const data = await this.call<{ message: Message }>("chat.postMessage", { channel, text });
     return data.message;
   }
@@ -175,8 +200,8 @@ export class Demo implements Chat {
   async connect() { return { team: "Offline demo", user: "You" }; }
   async channels() { return [{ id: "general", name: "general" }, { id: "dev", name: "dev" }, { id: "dm", is_im: true, user: "alice" }]; }
   async history(channel: string) { return [...(this.messages.get(channel) ?? [])]; }
-  async send(channel: string, text: string) {
-    const message = { ts: String(Date.now() / 1000), user: "you", text };
+  async send(channel: string, text: string, image?: ImageAttachment) {
+    const message = { ts: String(Date.now() / 1000), user: "you", text, ...(image ? { files: [{ name: image.filename }] } : {}) };
     this.messages.set(channel, [...(this.messages.get(channel) ?? []), message]);
     return message;
   }

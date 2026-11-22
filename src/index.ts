@@ -1,12 +1,13 @@
 import {
   BoxRenderable, TextRenderable, ScrollBoxRenderable,
   SelectRenderableEvents, TextareaRenderable, createCliRenderer,
-  StyledText, bg, fg,
+  StyledText, bg, fg, ImageRenderable, createHostClipboard, type HostClipboardService,
 } from "@opentui/core";
 import { Slack, Demo, channelName, displayText, messageText, isSidebarActive, type Channel, type Message } from "./slack";
 import { ChannelSelect } from "./channel-select";
 import { isUserToken, tokenProvider } from "./oauth";
 import { fileURLToPath } from "node:url";
+import { clipboardImage, MAX_IMAGE_BYTES, type ImageAttachment } from "./attachment";
 
 const demo = process.argv.includes("--demo");
 const token = process.env.SLACK_USER_TOKEN;
@@ -70,6 +71,23 @@ const scroll = new ScrollBoxRenderable(renderer, { flexGrow: 1, minHeight: 0, sc
 pane.add(scroll);
 const messages = new TextRenderable(renderer, { width: "100%", content: "", fg: "#e0def4", flexShrink: 0, wrapMode: "word" });
 scroll.add(messages);
+const attachmentBox = new BoxRenderable(renderer, {
+  width: "100%", height: 7, flexShrink: 0, flexDirection: "row", visible: false, backgroundColor: "#26233a",
+});
+const attachmentPreview = new ImageRenderable(renderer, {
+  width: 18, height: 6, fit: "fit",
+  onError: () => report("Image attached; preview unavailable. Enter sends it; Ctrl+G removes it."),
+});
+attachmentBox.add(attachmentPreview);
+const attachmentDetails = new BoxRenderable(renderer, { flexGrow: 1, minWidth: 0, flexDirection: "column" });
+attachmentBox.add(attachmentDetails);
+const attachmentLabel = new TextRenderable(renderer, { content: "", fg: "#b8b8b8", wrapMode: "word" });
+attachmentDetails.add(attachmentLabel);
+attachmentDetails.add(new TextRenderable(renderer, {
+  content: "[Remove image]  Ctrl+G", fg: "#9ccfd8", height: 1,
+  onMouseDown(event) { if (event.button === 0) { removeImage(); event.stopPropagation(); } },
+}));
+pane.add(attachmentBox);
 let composerExpanded = false;
 let lastComposerClick: { time: number; x: number; y: number } | undefined;
 const composer = new TextareaRenderable(renderer, {
@@ -100,7 +118,7 @@ function setComposerExpanded(expanded: boolean) {
 const status = new TextRenderable(renderer, { content: "Connecting…", height: 1, fg: "#908caa" });
 root.add(status);
 root.add(new TextRenderable(renderer, {
-  content: " Shift+Enter: expand/newline · Esc: collapse · Enter: send · Ctrl+L: active/all · Ctrl+D: DMs · Ctrl+R: refresh · Ctrl+C: quit",
+  content: " Ctrl+V: paste image/text · Ctrl+G: remove image · Shift+Enter: expand/newline · Enter: send · Ctrl+D: DMs · Ctrl+R: refresh",
   height: 1, fg: "#908caa",
 }));
 
@@ -121,8 +139,58 @@ let generation = 0;
 let sending = false;
 let closed = false;
 const drafts = new Map<string, string>();
-renderer.once("destroy", () => { closed = true; });
+const imageDrafts = new Map<string, ImageAttachment>();
+let clipboard: HostClipboardService | undefined;
+let readingClipboard = false;
+let pasteGeneration = 0;
+renderer.once("destroy", () => {
+  closed = true;
+  imageDrafts.clear();
+  void clipboard?.dispose().catch(() => {});
+});
 function report(text: string) { if (!closed) status.content = displayText(text, chat.users); }
+function updateAttachment() {
+  const image = selected ? imageDrafts.get(selected.id) : undefined;
+  attachmentBox.visible = !!image;
+  attachmentPreview.source = image?.bytes;
+  attachmentLabel.content = image ? `${image.filename}\n${image.mimeType} · ${Math.ceil(image.bytes.length / 1024)} KiB\nAdd an optional caption below; Enter sends both.` : "";
+}
+function removeImage() {
+  if (sending) { report("Wait for the current send to finish."); return; }
+  pasteGeneration++;
+  if (selected) imageDrafts.delete(selected.id);
+  updateAttachment();
+  composer.focus();
+}
+async function pasteClipboard() {
+  if (readingClipboard || sending || !selected) return;
+  const channel = selected.id;
+  const request = ++pasteGeneration;
+  readingClipboard = true;
+  report("Reading clipboard…");
+  try {
+    clipboard ??= createHostClipboard({ maxReadBytes: MAX_IMAGE_BYTES, timeoutMs: 5_000, maxImagePixels: 40_000_000 });
+    const result = await clipboard.read({ preferredTypes: ["image/png", "image/jpeg", "image/webp", "image/gif", "text/plain"] });
+    if (closed || request !== pasteGeneration || selected?.id !== channel) return;
+    if (result.status !== "read") {
+      report(`Clipboard ${result.status}. Ctrl+V reads this machine's clipboard; terminal paste still works for text.`);
+      return;
+    }
+    const { mimeType, bytes } = result.representation;
+    if (mimeType === "text/plain") {
+      const text = new TextDecoder().decode(bytes).replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+      if (text.includes("\n")) setComposerExpanded(true);
+      composer.insertText(text);
+      report("Text pasted");
+    } else {
+      const image = clipboardImage(bytes, mimeType);
+      imageDrafts.set(channel, image);
+      updateAttachment();
+      report("Image attached · Enter sends image + caption · Ctrl+G removes");
+    }
+  } catch (error) { if (request === pasteGeneration) report(String(error)); }
+  finally { readingClipboard = false; }
+}
 function renderMessages() {
   messages.content = currentMessages.length ? new StyledText(currentMessages.flatMap((message, index) => {
     const name = chat.users.get(message.user ?? "") ?? message.user ?? message.bot_id ?? "Slack";
@@ -139,9 +207,11 @@ async function load(channel: Channel) {
   if (closed) return;
   if (sending) { report("Wait for the current send to finish."); return; }
   if (selected) drafts.set(selected.id, composer.plainText);
+  pasteGeneration++;
   const changedChannel = selected?.id !== channel.id;
   selected = channel;
   composer.setText(drafts.get(channel.id) ?? "");
+  updateAttachment();
   if (changedChannel) setComposerExpanded(composer.plainText.includes("\n"));
   heading.content = channelName(channel, chat.users);
   currentMessages = [];
@@ -166,14 +236,15 @@ menu.on(SelectRenderableEvents.ITEM_SELECTED, (_index, option) => {
 });
 async function sendMessage() {
   const text = composer.plainText.trim();
-  if (!text || !selected || sending) return;
+  const image = selected ? imageDrafts.get(selected.id) : undefined;
+  if ((!text && !image) || !selected || sending || readingClipboard) return;
   const channel = selected;
   const original = composer.plainText;
   const request = ++generation; // A pending history response must not overwrite this send.
   sending = true;
-  report("Sending…");
+  report(image ? "Uploading image and sending caption…" : "Sending…");
   try {
-    const message = await chat.send(channel.id, text);
+    const message = await chat.send(channel.id, text, image);
     if (closed) return;
     if (request === generation) {
       currentMessages.push(message);
@@ -185,13 +256,23 @@ async function sendMessage() {
       setComposerExpanded(false);
     }
     drafts.set(channel.id, composer.plainText);
+    if (imageDrafts.get(channel.id) === image) imageDrafts.delete(channel.id);
+    updateAttachment();
     report("Sent · Ctrl+R to fetch incoming messages");
   } catch (error) {
-    report(`${String(error)} · Draft kept; check Slack before retrying if delivery is uncertain.`);
+    report(String(error).includes("missing_scope")
+      ? "Image upload needs files:write under User Token Scopes. Add it in Slack app settings and reinstall/reauthorize. Draft kept."
+      : `${String(error)} · Draft kept; check Slack before retrying if delivery is uncertain.`);
   } finally { sending = false; }
 }
 renderer.keyInput.on("keypress", key => {
-  if (composer.focused && key.shift && (key.name === "return" || key.name === "enter")) {
+  if (composer.focused && key.ctrl && key.name === "v") {
+    key.preventDefault();
+    void pasteClipboard();
+  } else if (key.ctrl && key.name === "g") {
+    key.preventDefault();
+    removeImage();
+  } else if (composer.focused && key.shift && (key.name === "return" || key.name === "enter")) {
     key.preventDefault();
     setComposerExpanded(true);
     composer.newLine();
