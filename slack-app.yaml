@@ -1,0 +1,20 @@
+display_information:
+  name: slack-tui
+  description: Personal terminal chat client
+  background_color: "#191724"
+oauth_config:
+  scopes:
+    user:
+      - channels:read
+      - groups:read
+      - im:read
+      - mpim:read
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+      - users:read
+      - chat:write
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
