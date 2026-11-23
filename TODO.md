@@ -4,6 +4,8 @@ Keep this list updated as ideas come up and work is completed. Check off finishe
 
 - [ ] **Persist drafts across restarts.** Save per-workspace, per-conversation text and image drafts to disk with owner-only permissions. Autosave with a short debounce, flush on exit, restore on startup, and remove drafts after successful sends.
 - [ ] **Themes.** Add selectable color themes and persist the chosen theme in settings.
+- [ ] Help text at bottom sensitive to what pane is active
+- [ ] Channel name search
 
 ## Completed
 
