@@ -26,7 +26,8 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
     ]],
     ["Writing messages", [
       "Enter — Send the message and any attached image.",
-      "Click 🖋️ beside your sent message. Ctrl+S saves; Esc cancels. Your composer draft is kept.",
+      "Click ✎ beside your sent message. Ctrl+S saves; Esc cancels. Your composer draft is kept.",
+      "Click 🎭+ below a message to open its emoji palette. Click an emoji to toggle your reaction; ✓ means you reacted.",
       "Shift+Enter — Expand the composer and insert a newline.",
       "Escape — Collapse the expanded composer, keeping the draft.",
       "Ctrl+V — Paste clipboard text or attach an image (composer focused).",
@@ -75,7 +76,7 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
     ]],
     ["Current limits", [
       "Incoming messages refresh manually with Ctrl+R; each history load shows up to 50 recent messages.",
-      "No thread navigation, message search, adding/removing reactions, or persistent message cache yet.",
+      "No thread navigation, message search, or persistent message cache yet.",
       "Standard emoji and reaction counts are shown; custom workspace emoji remain shortcode names.",
       "If a send reports uncertain delivery, check Slack before retrying to avoid duplicates.",
     ]],

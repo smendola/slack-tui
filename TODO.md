@@ -7,10 +7,10 @@ Keep this list updated as ideas come up and work is completed. Check off finishe
 - [ ] **Themes.** Add selectable color themes and persist the chosen theme in settings.
 - [ ] Investigate `conversations.history: invalid_ts_oldest` during unread checks; one rejected cursor stops the sweep for remaining conversations.
 - [ ] In DM, display avatar (if setting is YES) and status in channel title bar; and drop the @
-- [!] Reaction emojis support
 
 ## Completed
 
+- [x] Add and remove emoji reactions from the inline message palette.
 - [x] Edit your sent messages without disturbing the composer draft.
 - [x] Search conversation names in the sidebar and clear the filter when opening a match.
 - [x] Reopen the last conversation on restart, including DMs.

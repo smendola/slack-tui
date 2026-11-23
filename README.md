@@ -183,6 +183,10 @@ For an existing installation, add the scopes and reinstall/reauthorize the app,
 then update your saved credentials if Slack issues a new token. Until authorized,
 unread styling clears locally for this session only.
 
+Click **🎭+** below a message to choose from its emoji palette, or click an existing reaction to toggle yours.
+A check mark means you’ve reacted. Existing Slack installations need the `reactions:write`
+user token scope and reauthorization to add or remove reactions.
+
 ## Current limitations
 
 - **Refresh is manual:** press Ctrl+R to fetch incoming messages.
@@ -192,7 +196,7 @@ unread styling clears locally for this session only.
 - **Approximate active-only sidebar:** hides conversations Slack marks dormant
   and explicitly closed DMs. Ctrl+L reveals all loaded conversations. Activity
   metadata is loaded at startup; custom sections and muted preferences aren't synced.
-- No thread navigation, adding/removing reactions, search or persistent
+- No thread navigation, message search or persistent
   message cache yet.
 
 If a send reports an uncertain delivery, check Slack before retrying to avoid

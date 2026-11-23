@@ -5,7 +5,7 @@ import {
   StyledText, bg, fg, BorderChars, ImageRenderable, createHostClipboard, type HostClipboardService,
   createClipboard, createRendererClipboardAdapter, type ClipboardService, type Selection,
 } from "@opentui/core";
-import { Slack, Demo, channelName, displayText, isSidebarActive, laterTimestamp, type Channel, type Message } from "./slack";
+import { Slack, Demo, channelName, displayText, isSidebarActive, laterTimestamp, updateReaction, type Channel, type Message } from "./slack";
 import { ChannelSelect } from "./channel-select";
 import { tokenProvider } from "./oauth";
 import { credentialsPath } from "./config-paths";
@@ -118,6 +118,7 @@ const avatarCache = new AvatarCache();
 const messageImageCache = new MessageImageCache(image => chat.readImage(image));
 let messageRenderVersion = 0;
 function clearMessages() {
+  reactionPalette = undefined;
   messageRenderVersion++;
   for (const child of [...messages.getChildren()]) {
     messages.remove(child);
@@ -180,6 +181,60 @@ function setComposerExpanded(expanded: boolean) {
 }
 const status = new TextRenderable(renderer, { content: "Connecting…", height: 1, fg: "#908caa" });
 let ownUserId: string | undefined;
+const paletteNames = ["+1", "-1", "heart", "tada", "smile", "joy", "eyes", "clap", "raised_hands",
+  "fire", "rocket", "white_check_mark", "pray", "sunglasses", "wave", "star"];
+function reactionIcon(name: string) {
+  // The emoji-style heart has inconsistent cell width across terminals.
+  return name === "heart" ? "💗" : renderEmoji(`:${name}:`);
+}
+let reactionPalette: BoxRenderable | undefined;
+function closeReactionPalette() {
+  reactionPalette?.destroyRecursively();
+  reactionPalette = undefined;
+}
+function toggleReactionPalette(message: Message, column: BoxRenderable, notice: TextRenderable) {
+  const wasOpen = reactionPalette?.parent === column;
+  closeReactionPalette();
+  if (wasOpen) return;
+  const palette = new BoxRenderable(renderer, { flexDirection: "row", flexWrap: "wrap", flexShrink: 0 });
+  reactionPalette = palette;
+  column.add(palette);
+  for (const name of paletteNames) {
+    palette.add(button(renderer, reactionIcon(name), () => {
+      closeReactionPalette();
+      const mine = message.reactions?.some(item => item.name === name && ownUserId && item.users?.includes(ownUserId));
+      void react(message, name, !mine, notice);
+    }));
+  }
+}
+const pendingReactions = new Set<string>();
+async function react(message: Message, name: string, add: boolean, notice: TextRenderable) {
+  const channel = selected?.id;
+  if (!channel || !ownUserId || !currentMessages.includes(message)) return;
+  const key = JSON.stringify([channel, message.ts, name]);
+  if (pendingReactions.has(key)) return;
+  pendingReactions.add(key);
+  notice.content = `${add ? "Adding" : "Removing"} :${name}:…`;
+  notice.visible = true;
+  try {
+    await chat.setReaction(channel, message.ts, name, add);
+    if (closed || channel !== selected?.id) return;
+    const current = currentMessages.find(item => item.ts === message.ts);
+    if (!current) return;
+    updateReaction(current, ownUserId, name, add);
+    const position = scroll.scrollTop;
+    renderMessages();
+    scroll.scrollTo(position);
+    report(`Reaction ${add ? "added" : "removed"}: :${name}:`);
+  } catch (error) {
+    const reason = String(error).includes("missing_scope")
+      ? "Add reactions:write to your Slack app’s User Token Scopes, then reinstall and reconnect with the updated user token."
+      : String(error);
+    const failure = `Could not ${add ? "add" : "remove"} :${name}: — ${reason}`;
+    if (!notice.isDestroyed) notice.content = failure;
+    report(failure);
+  } finally { pendingReactions.delete(key); }
+}
 let editing: { channel: string; ts: string } | undefined;
 let savingEdit = false;
 const editScreen = new BoxRenderable(renderer, {
@@ -562,7 +617,7 @@ function renderMessages() {
     }));
     if (ownUserId && message.user === ownUserId && message.text && !message.files?.some(file => file.previewBytes)) {
       header.add(new TextRenderable(renderer, {
-        content: " 🖋️ ", fg: "#9ccfd8", selectable: false,
+        content: " ✎ ", fg: "#9ccfd8", selectable: false,
         onMouseDown(event) { if (event.button === 0) { event.stopPropagation(); openEdit(message); } },
       }));
     }
@@ -605,11 +660,17 @@ function renderMessages() {
         label.content = `[image: ${displayText(source.label, chat.users)}] ${displayText(String(error), chat.users)}`;
       });
     }
-    if (message.reactions?.length) {
-      textColumn.add(new TextRenderable(renderer, {
-        width: "100%", flexShrink: 0, wrapMode: "word", fg: "#9ccfd8",
-        content: message.reactions.map(reaction => `${renderEmoji(`:${reaction.name}:`)} ${reaction.count}`).join("  "),
-      }));
+    if (demo || !message.files?.some(file => file.previewBytes)) {
+      const reactions = new BoxRenderable(renderer, { flexDirection: "row", flexWrap: "wrap", flexShrink: 0, columnGap: 1 });
+      const notice = new TextRenderable(renderer, { visible: false, width: "100%", flexShrink: 0, fg: "#f6c177", wrapMode: "word" });
+      for (const reaction of message.reactions ?? []) {
+        const mine = !!ownUserId && !!reaction.users?.includes(ownUserId);
+        const label = `${reactionIcon(reaction.name)} ${reaction.count}${mine ? " ✓" : ""}`;
+        reactions.add(button(renderer, label, () => { void react(message, reaction.name, !mine, notice); }));
+      }
+      reactions.add(button(renderer, "🎭+", () => toggleReactionPalette(message, textColumn, notice)));
+      textColumn.add(reactions);
+      textColumn.add(notice);
     }
     row.add(textColumn);
     messages.add(row);
@@ -714,6 +775,11 @@ async function sendMessage() {
   } finally { sending = false; }
 }
 renderer.keyInput.on("keypress", key => {
+  if (reactionPalette && !editing && !settingsOpen && !helpOpen && key.name === "escape") {
+    key.preventDefault();
+    closeReactionPalette();
+    return;
+  }
   if (editing) {
     if (savingEdit) { key.preventDefault(); return; }
     if (key.ctrl && key.name === "s") { key.preventDefault(); void saveEdit(); }

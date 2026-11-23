@@ -19,6 +19,7 @@ oauth_config:
       - mpim:history
       - users:read
       - chat:write
+      - reactions:write
       - files:write
       - files:read
 settings:

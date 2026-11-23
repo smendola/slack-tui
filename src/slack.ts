@@ -26,7 +26,7 @@ export type Message = {
   bot_profile?: { name?: string; icons?: { image_48?: string; image_72?: string } };
   reply_count?: number; files?: MessageFile[];
   blocks?: ImageBlock[];
-  reactions?: { name: string; count: number }[];
+  reactions?: { name: string; count: number; users?: string[] }[];
   attachments?: {
     pretext?: string; author_name?: string; title?: string; title_link?: string;
     text?: string; fallback?: string; footer?: string;
@@ -47,6 +47,7 @@ export interface Chat {
   presence(user: string): Promise<Presence | undefined>;
   send(channel: string, text: string, image?: ImageAttachment): Promise<Message>;
   edit(channel: string, ts: string, text: string): Promise<void>;
+  setReaction(channel: string, ts: string, name: string, add: boolean): Promise<void>;
   readImage(image: MessageImage): Promise<Uint8Array>;
 }
 
@@ -64,7 +65,7 @@ export class Slack implements Chat {
     const wait = Math.ceil(((this.blockedUntil.get(method) ?? 0) - Date.now()) / 1000);
     if (wait > 0) throw new Error(`Rate limited: retry ${method} in ${wait}s.`);
     const form = method.startsWith("files.");
-    const write = method === "chat.postMessage" || method === "chat.update" || method === "conversations.mark" || form;
+    const write = method === "chat.postMessage" || method === "chat.update" || method.startsWith("reactions.") || method === "conversations.mark" || form;
     const url = new URL(`https://slack.com/api/${method}`);
     if (!write) {
       for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
@@ -207,11 +208,28 @@ export class Slack implements Chat {
   async edit(channel: string, ts: string, text: string) {
     await this.call("chat.update", { channel, ts, text });
   }
+  async setReaction(channel: string, ts: string, name: string, add: boolean) {
+    await this.call(add ? "reactions.add" : "reactions.remove", { channel, timestamp: ts, name });
+  }
   readImage(image: MessageImage) {
     if (!image.bytes && image.private && this.grantedScopes && !this.grantedScopes.has("files:read")) {
       return Promise.reject(new Error("Missing files:read permission. Add it to User Token Scopes and reauthorize the app."));
     }
     return downloadMessageImage(image, async () => typeof this.token === "function" ? this.token() : this.token);
+  }
+}
+
+export function updateReaction(message: Message, user: string, name: string, add: boolean) {
+  const reactions = message.reactions ??= [];
+  const reaction = reactions.find(item => item.name === name);
+  if (!reaction) {
+    if (add) reactions.push({ name, count: 1, users: [user] });
+  } else if (add && !reaction.users?.includes(user)) {
+    (reaction.users ??= []).push(user);
+    reaction.count++;
+  } else if (!add && reaction.users?.includes(user)) {
+    reaction.users = reaction.users.filter(id => id !== user);
+    if (--reaction.count === 0) reactions.splice(reactions.indexOf(reaction), 1);
   }
 }
 
@@ -316,6 +334,11 @@ export class Demo implements Chat {
   async connect() { return { team: "Offline demo", user: "You", team_id: "demo", user_id: "you" }; }
   async channels() { return [{ id: "general", name: "general" }, { id: "dev", name: "dev" }, { id: "dm", is_im: true, user: "alice" }]; }
   async history(channel: string) { return [...(this.messages.get(channel) ?? [])]; }
+  async setReaction(channel: string, ts: string, name: string, add: boolean) {
+    const message = this.messages.get(channel)?.find(message => message.ts === ts);
+    if (!message) throw new Error("Message not found.");
+    updateReaction(message, "you", name, add);
+  }
   async edit(channel: string, ts: string, text: string) {
     const message = this.messages.get(channel)?.find(message => message.ts === ts);
     if (!message || message.user !== "you") throw new Error("Cannot edit this message.");
