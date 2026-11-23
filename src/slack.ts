@@ -46,6 +46,7 @@ export interface Chat {
   markRead(channel: string, ts: string): Promise<void>;
   presence(user: string): Promise<Presence | undefined>;
   send(channel: string, text: string, image?: ImageAttachment): Promise<Message>;
+  edit(channel: string, ts: string, text: string): Promise<void>;
   readImage(image: MessageImage): Promise<Uint8Array>;
 }
 
@@ -63,7 +64,7 @@ export class Slack implements Chat {
     const wait = Math.ceil(((this.blockedUntil.get(method) ?? 0) - Date.now()) / 1000);
     if (wait > 0) throw new Error(`Rate limited: retry ${method} in ${wait}s.`);
     const form = method.startsWith("files.");
-    const write = method === "chat.postMessage" || method === "conversations.mark" || form;
+    const write = method === "chat.postMessage" || method === "chat.update" || method === "conversations.mark" || form;
     const url = new URL(`https://slack.com/api/${method}`);
     if (!write) {
       for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
@@ -203,6 +204,9 @@ export class Slack implements Chat {
     const data = await this.call<{ message: Message }>("chat.postMessage", { channel, text });
     return data.message;
   }
+  async edit(channel: string, ts: string, text: string) {
+    await this.call("chat.update", { channel, ts, text });
+  }
   readImage(image: MessageImage) {
     if (!image.bytes && image.private && this.grantedScopes && !this.grantedScopes.has("files:read")) {
       return Promise.reject(new Error("Missing files:read permission. Add it to User Token Scopes and reauthorize the app."));
@@ -312,6 +316,11 @@ export class Demo implements Chat {
   async connect() { return { team: "Offline demo", user: "You", team_id: "demo", user_id: "you" }; }
   async channels() { return [{ id: "general", name: "general" }, { id: "dev", name: "dev" }, { id: "dm", is_im: true, user: "alice" }]; }
   async history(channel: string) { return [...(this.messages.get(channel) ?? [])]; }
+  async edit(channel: string, ts: string, text: string) {
+    const message = this.messages.get(channel)?.find(message => message.ts === ts);
+    if (!message || message.user !== "you") throw new Error("Cannot edit this message.");
+    message.text = text;
+  }
   async markRead(_channel: string, _ts: string) {}
   async presence(user: string): Promise<Presence> { return user === "alice" ? "active" : "away"; }
   async unread(channel: string, locallyRead?: string) {

@@ -1,5 +1,6 @@
 import { BoxRenderable, ScrollBoxRenderable, TextRenderable, type RenderContext } from "@opentui/core";
 import { credentialsPath, settingsPath } from "./config-paths";
+import { button } from "./button";
 
 export function createHelpScreen(context: RenderContext, close: () => void) {
   const screen = new BoxRenderable(context, {
@@ -25,6 +26,7 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
     ]],
     ["Writing messages", [
       "Enter — Send the message and any attached image.",
+      "Click 🖋️ beside your sent message. Ctrl+S saves; Esc cancels. Your composer draft is kept.",
       "Shift+Enter — Expand the composer and insert a newline.",
       "Escape — Collapse the expanded composer, keeping the draft.",
       "Ctrl+V — Paste clipboard text or attach an image (composer focused).",
@@ -86,12 +88,12 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
       content: `${lines.join("\n")}\n\n`, fg: "#e0def4", width: "100%", flexShrink: 0, wrapMode: "word",
     }));
   }
-  screen.add(new TextRenderable(context, {
-    content: "[Back] Esc / F1 · ↑↓ / PgUp / PgDn / mouse wheel: scroll · Home / End",
+  const actions = new BoxRenderable(context, { flexDirection: "row", flexShrink: 0, columnGap: 1 });
+  screen.add(actions);
+  actions.add(button(context, "Back", close));
+  actions.add(new TextRenderable(context, {
+    content: "Esc / F1 · ↑↓ / PgUp / PgDn / mouse wheel: scroll · Home / End",
     fg: "#9ccfd8", flexShrink: 0, wrapMode: "word",
-    onMouseDown(event) {
-      if (event.button === 0) { close(); event.stopPropagation(); }
-    },
   }));
   return { screen, scroll };
 }

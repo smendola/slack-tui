@@ -16,6 +16,7 @@ import { defaultSettings, loadSettings, saveSettings, settingsPath, type Setting
 import { messageImages, MessageImageCache } from "./message-images";
 import { renderEmoji } from "./emoji";
 import { createHelpScreen } from "./help";
+import { button } from "./button";
 import { messageSelectionText } from "./message-selection";
 import { restoreDraft } from "./drafts";
 import { lastConversation } from "./last-conversation";
@@ -144,10 +145,7 @@ const attachmentDetails = new BoxRenderable(renderer, { flexGrow: 1, minWidth: 0
 attachmentBox.add(attachmentDetails);
 const attachmentLabel = new TextRenderable(renderer, { content: "", fg: "#b8b8b8", wrapMode: "word" });
 attachmentDetails.add(attachmentLabel);
-attachmentDetails.add(new TextRenderable(renderer, {
-  content: "[Remove image]  Ctrl+G", fg: "#9ccfd8", height: 1,
-  onMouseDown(event) { if (event.button === 0) { removeImage(); event.stopPropagation(); } },
-}));
+attachmentDetails.add(button(renderer, "Remove image · Ctrl+G", removeImage));
 composerSection.add(attachmentBox);
 let composerExpanded = false;
 let lastComposerClick: { time: number; x: number; y: number } | undefined;
@@ -181,6 +179,58 @@ function setComposerExpanded(expanded: boolean) {
   updateFooter();
 }
 const status = new TextRenderable(renderer, { content: "Connecting…", height: 1, fg: "#908caa" });
+let ownUserId: string | undefined;
+let editing: { channel: string; ts: string } | undefined;
+let savingEdit = false;
+const editScreen = new BoxRenderable(renderer, {
+  flexGrow: 1, minHeight: 0, flexDirection: "column", border: true, title: "Edit sent message", visible: false,
+});
+root.add(editScreen);
+const editText = new TextareaRenderable(renderer, { flexGrow: 1, minHeight: 1 });
+editScreen.add(editText);
+const editActions = new BoxRenderable(renderer, { flexDirection: "row", height: 1, columnGap: 1 });
+editScreen.add(editActions);
+editActions.add(button(renderer, "Save", saveEdit));
+editActions.add(button(renderer, "Cancel", cancelEdit));
+function openEdit(message: Message) {
+  if (!selected || editing) return;
+  editing = { channel: selected.id, ts: message.ts };
+  body.visible = false;
+  editScreen.visible = true;
+  restoreDraft(editText, message.text ?? "");
+  // Let mouse-down focus handling finish on the old message header first.
+  queueMicrotask(() => { if (editing) editText.focus(); });
+}
+function cancelEdit() {
+  if (savingEdit) return;
+  editing = undefined;
+  editScreen.visible = false;
+  body.visible = true;
+  composer.focus();
+}
+async function saveEdit() {
+  if (!editing || savingEdit) return;
+  const text = editText.plainText;
+  if (!text.trim()) { report("Enter some text before saving."); return; }
+  const { channel, ts } = editing;
+  savingEdit = true;
+  try {
+    await chat.edit(channel, ts, text);
+    if (closed) return;
+    const message = currentMessages.find(message => message.ts === ts);
+    if (message && selected?.id === channel) {
+      message.text = text;
+      const position = scroll.scrollTop;
+      renderMessages();
+      scroll.scrollTo(position);
+    }
+  } catch (error) {
+    report(`Edit not saved: ${String(error)}`);
+    return;
+  } finally { savingEdit = false; }
+  cancelEdit();
+  report("Message edited.");
+}
 let settingsOpen = false;
 let settingsSaving = false;
 let returnToComposer = false;
@@ -191,21 +241,18 @@ const settingsScreen = new BoxRenderable(renderer, {
   border: true, title: "Settings", borderColor: "#524f67", visible: false, focusable: true,
 });
 root.add(settingsScreen);
-const photosSetting = new TextRenderable(renderer, {
-  content: "", fg: "#e0def4", height: 2,
-  onMouseDown(event) {
-    if (event.button === 0) { void toggleProfilePhotos(); event.stopPropagation(); }
-  },
-});
-settingsScreen.add(photosSetting);
+const photosRow = new BoxRenderable(renderer, { flexDirection: "row", height: 2, columnGap: 1 });
+settingsScreen.add(photosRow);
+photosRow.add(new TextRenderable(renderer, { content: "Show profile photos:", fg: "#e0def4" }));
+const photosSetting = button(renderer, "", toggleProfilePhotos);
+photosRow.add(photosSetting);
 const settingsNotice = new TextRenderable(renderer, { content: "", fg: "#908caa", wrapMode: "word" });
 settingsScreen.add(settingsNotice);
-settingsScreen.add(new TextRenderable(renderer, {
-  content: "\n[Back to chat]  Esc / F2", fg: "#9ccfd8", height: 2,
-  onMouseDown(event) { if (event.button === 0) { closeSettings(); event.stopPropagation(); } },
-}));
+const settingsBack = button(renderer, "Back to chat · Esc / F2", closeSettings);
+settingsBack.marginTop = 1;
+settingsScreen.add(settingsBack);
 function updateSettingsScreen() {
-  photosSetting.content = `Show profile photos:  ${settings.showProfilePhotos ? "[Yes]  No" : "Yes  [No]"}${settingsSaving ? "  Saving…" : ""}`;
+  photosSetting.content = ` ${settings.showProfilePhotos ? "Yes" : "No"}${settingsSaving ? " · Saving…" : ""} `;
   settingsNotice.content = `${settingsLoadError || "Click or press Space / Enter to toggle. Changes save automatically."}\n\nStored in ${settingsPath}`;
 }
 function openSettings() {
@@ -274,7 +321,8 @@ function updateFooter() {
   // Help has its own navigation hints beneath the scroll area.
   footer.visible = !helpOpen;
   if (helpOpen) return;
-  if (settingsOpen) footer.content = " Space/Enter: toggle · Esc: back · F1: help";
+  if (editing) footer.content = " Ctrl+S: save edit · Enter: newline · Esc: cancel";
+  else if (settingsOpen) footer.content = " Space/Enter: toggle · Esc: back · F1: help";
   else if (search.focused) footer.content = " Type a name · ↑↓: choose · Enter: open · Esc: clear · F1: help";
   else if (composer.focused) {
     footer.content = ` Enter: send · Shift+Enter: newline · ${composerExpanded ? "Esc: collapse" : "Ctrl+V: paste"} · Tab: sidebar · F1: help`;
@@ -282,7 +330,7 @@ function updateFooter() {
     footer.content = " /: search · ↑↓: choose · Enter: open · Ctrl+D: DMs · Ctrl+L: active/all · Tab: write · F1: help";
   }
 }
-for (const pane of [menu, search, composer, settingsScreen, help.screen]) pane.on("focused", updateFooter);
+for (const pane of [menu, search, composer, editText, settingsScreen, help.screen]) pane.on("focused", updateFooter);
 
 let selected: Channel | undefined;
 let lastOpened: ReturnType<typeof lastConversation> | undefined;
@@ -506,10 +554,18 @@ function renderMessages() {
       row.add(avatarColumn);
     }
     const textColumn = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, flexBasis: 0, minWidth: 0 });
-    textColumn.add(new TextRenderable(renderer, {
-      width: "100%", flexShrink: 0, wrapMode: "word",
+    const header = new BoxRenderable(renderer, { flexDirection: "row", flexShrink: 0, flexWrap: "wrap" });
+    textColumn.add(header);
+    header.add(new TextRenderable(renderer, {
+      wrapMode: "word",
       content: new StyledText([bg("#444444")(fg("#b8b8b8")(` ${name}  ${time} `))]),
     }));
+    if (ownUserId && message.user === ownUserId && message.text && !message.files?.some(file => file.previewBytes)) {
+      header.add(new TextRenderable(renderer, {
+        content: " 🖋️ ", fg: "#9ccfd8", selectable: false,
+        onMouseDown(event) { if (event.button === 0) { event.stopPropagation(); openEdit(message); } },
+      }));
+    }
     textColumn.add(new TextRenderable(renderer, {
       width: "100%", flexShrink: 0, fg: "#e0def4", wrapMode: "word",
       content: messageContent(message, chat.users, `${files ? `\n${files}` : ""}${message.reply_count ? `\n↳ ${message.reply_count} replies (not loaded)` : ""}`),
@@ -658,6 +714,12 @@ async function sendMessage() {
   } finally { sending = false; }
 }
 renderer.keyInput.on("keypress", key => {
+  if (editing) {
+    if (savingEdit) { key.preventDefault(); return; }
+    if (key.ctrl && key.name === "s") { key.preventDefault(); void saveEdit(); }
+    else if (key.name === "escape") { key.preventDefault(); cancelEdit(); }
+    return;
+  }
   if (key.name === "f1") {
     key.preventDefault();
     if (helpOpen) closeHelp(); else openHelp();
@@ -733,6 +795,7 @@ renderer.keyInput.on("keypress", key => {
 menu.focus();
 try {
   const identity = await chat.connect();
+  ownUserId = identity.user_id;
   const channels = await chat.channels();
   if (!closed) {
     title.content = ` slack-tui · ${identity.team} · ${identity.user}${demo ? " · DEMO" : ""}`;
