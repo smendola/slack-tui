@@ -183,7 +183,7 @@ For an existing installation, add the scopes and reinstall/reauthorize the app,
 then update your saved credentials if Slack issues a new token. Until authorized,
 unread styling clears locally for this session only.
 
-Click **🎭+** below a message to choose from its emoji palette, or click an existing reaction to toggle yours.
+Click the **smiley-plus icon** below a message to choose from its emoji palette, or click an existing reaction to toggle yours.
 A check mark means you’ve reacted. Existing Slack installations need the `reactions:write`
 user token scope and reauthorization to add or remove reactions.
 

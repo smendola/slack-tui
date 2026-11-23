@@ -2,7 +2,7 @@
 import {
   BoxRenderable, TextRenderable, ScrollBoxRenderable, InputRenderable,
   SelectRenderableEvents, TextareaRenderable, createCliRenderer,
-  StyledText, bg, fg, BorderChars, ImageRenderable, createHostClipboard, type HostClipboardService,
+  StyledText, bg, fg, BorderChars, ImageRenderable, NativeImage, createHostClipboard, type HostClipboardService,
   createClipboard, createRendererClipboardAdapter, type ClipboardService, type Selection,
 } from "@opentui/core";
 import { Slack, Demo, channelName, displayText, isSidebarActive, laterTimestamp, updateReaction, type Channel, type Message } from "./slack";
@@ -38,6 +38,8 @@ if (!demo && !credentials) {
 }
 const chat = demo ? new Demo() : new Slack(tokenProvider(credentials!, credentialsPath));
 const renderer = await createCliRenderer({ exitOnCtrlC: true });
+const reactionPickerIcon = NativeImage.decode(await Bun.file(new URL("../assets/reaction-picker.png", import.meta.url)).bytes());
+renderer.once("destroy", () => reactionPickerIcon.dispose());
 const root = new BoxRenderable(renderer, { width: "100%", height: "100%", flexDirection: "column", backgroundColor: "#191724" });
 renderer.root.add(root);
 const title = new TextRenderable(renderer, { content: " slack-tui · Connecting…", height: 1, fg: "#c4a7e7" });
@@ -712,7 +714,14 @@ function renderMessages() {
         const label = `${reactionIcon(reaction.name)} ${reaction.count}${mine ? " ✓" : ""}`;
         reactions.add(button(renderer, label, () => { void react(message, reaction.name, !mine, notice); }));
       }
-      reactions.add(button(renderer, "🎭+", () => toggleReactionPalette(message, textColumn, notice)));
+      reactions.add(new ImageRenderable(renderer, {
+        source: reactionPickerIcon, width: 2, height: 1, fit: "fit",
+        onMouseDown(event) {
+          if (event.button !== 0) return;
+          event.stopPropagation();
+          toggleReactionPalette(message, textColumn, notice);
+        },
+      }));
       textColumn.add(reactions);
       textColumn.add(notice);
     }
