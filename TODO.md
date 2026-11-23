@@ -7,8 +7,8 @@ Keep this list updated as ideas come up and work is completed. Check off finishe
 - [ ] **Themes.** Add selectable color themes and persist the chosen theme in settings.
 - [ ] Help text at bottom sensitive to what pane is active
 - [ ] Channel name search
-- [ ] Do not open first channel on startup
-- [ ] In DM, display avatar in channel title bar; and drop the @
+- [ ] Remember last opened channel on restart
+- [ ] In DM, display avatar and status in channel title bar; and drop the @
 - [ ] Reaction emojis support
 - [ ] Edit sent message support
 
