@@ -5,7 +5,6 @@ Keep this list updated as ideas come up and work is completed. Check off finishe
 - [ ] Replicate channel layout from official app
 - [ ] **Persist drafts across restarts.** Save per-workspace, per-conversation text and image drafts to disk with owner-only permissions. Autosave with a short debounce, flush on exit, restore on startup, and remove drafts after successful sends.
 - [ ] **Themes.** Add selectable color themes and persist the chosen theme in settings.
-- [!] Channel name search
 - [ ] Investigate `conversations.history: invalid_ts_oldest` during unread checks; one rejected cursor stops the sweep for remaining conversations.
 - [ ] In DM, display avatar (if setting is YES) and status in channel title bar; and drop the @
 - [!] Reaction emojis support
@@ -13,6 +12,7 @@ Keep this list updated as ideas come up and work is completed. Check off finishe
 
 ## Completed
 
+- [x] Search conversation names in the sidebar and clear the filter when opening a match.
 - [x] Reopen the last conversation on restart, including DMs.
 - [x] Show footer shortcuts for the active pane.
 - [x] Show a local-date separator before each day's messages.

@@ -16,6 +16,7 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
       "F2 — Open / close settings.",
       "Tab — Switch focus between the sidebar and composer.",
       "Up / Down, then Enter — Choose and open a conversation in the sidebar.",
+      "/ in the sidebar, or click Search names — Search all names on the current tab, including inactive conversations. Esc clears the search.",
       "Click Channels or DMs, or press Ctrl+D, to switch lists. Group DMs are under Channels.",
       "Ctrl+L — Toggle active-only / all conversations.",
       "Ctrl+R — Refresh current messages, unread status and DM presence.",
@@ -72,7 +73,7 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
     ]],
     ["Current limits", [
       "Incoming messages refresh manually with Ctrl+R; each history load shows up to 50 recent messages.",
-      "No thread navigation, search, adding/removing reactions, or persistent message cache yet.",
+      "No thread navigation, message search, adding/removing reactions, or persistent message cache yet.",
       "Standard emoji and reaction counts are shown; custom workspace emoji remain shortcode names.",
       "If a send reports uncertain delivery, check Slack before retrying to avoid duplicates.",
     ]],

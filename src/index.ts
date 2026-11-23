@@ -1,6 +1,6 @@
 // Agent sessions: OC:x13-cachy:sal:ses_df58f4884ffeQ73n6oD4HRDj22 Edited
 import {
-  BoxRenderable, TextRenderable, ScrollBoxRenderable,
+  BoxRenderable, TextRenderable, ScrollBoxRenderable, InputRenderable,
   SelectRenderableEvents, TextareaRenderable, createCliRenderer,
   StyledText, bg, fg, BorderChars, ImageRenderable, createHostClipboard, type HostClipboardService,
   createClipboard, createRendererClipboardAdapter, type ClipboardService, type Selection,
@@ -75,6 +75,11 @@ const sidebarTabs = ["Channels", "DMs"].map(label => {
   tabRow.add(tab);
   return { tab, isDM };
 });
+const search = new InputRenderable(renderer, {
+  placeholder: "/ Search names", width: "100%", flexShrink: 0,
+  backgroundColor: "#191724", focusedBackgroundColor: "#403d52",
+});
+sidebar.add(search);
 const menu = new ChannelSelect(renderer, {
   width: "100%", flexGrow: 1, minHeight: 0, options: [], showDescription: false,
   backgroundColor: "#191724", textColor: "#e0def4", selectedBackgroundColor: "#403d52",
@@ -270,13 +275,14 @@ function updateFooter() {
   footer.visible = !helpOpen;
   if (helpOpen) return;
   if (settingsOpen) footer.content = " Space/Enter: toggle · Esc: back · F1: help";
+  else if (search.focused) footer.content = " Type a name · ↑↓: choose · Enter: open · Esc: clear · F1: help";
   else if (composer.focused) {
     footer.content = ` Enter: send · Shift+Enter: newline · ${composerExpanded ? "Esc: collapse" : "Ctrl+V: paste"} · Tab: sidebar · F1: help`;
   } else {
-    footer.content = " ↑↓: choose · Enter: open · Ctrl+D: channels/DMs · Ctrl+L: active/all · Tab: write · F1: help";
+    footer.content = " /: search · ↑↓: choose · Enter: open · Ctrl+D: DMs · Ctrl+L: active/all · Tab: write · F1: help";
   }
 }
-for (const pane of [menu, composer, settingsScreen, help.screen]) pane.on("focused", updateFooter);
+for (const pane of [menu, search, composer, settingsScreen, help.screen]) pane.on("focused", updateFooter);
 
 let selected: Channel | undefined;
 let lastOpened: ReturnType<typeof lastConversation> | undefined;
@@ -350,15 +356,18 @@ function readLocally(channel: Channel, messages: Message[]) {
 function switchSidebar(dms: boolean) {
   if (showDMs !== dms) {
     showDMs = dms;
+    search.value = "";
     updateSidebar();
     if (showDMs) void refreshPresence();
   }
   menu.focus();
 }
 function updateSidebar(preferredId = selected?.id) {
+  const query = search.value.trim().toLowerCase();
   const channels = allChannels.filter(channel => !!channel.is_im === showDMs
-    && (showAll || channel.id === preferredId || isSidebarActive(channel)));
-  sidebar.title = `${showAll ? "All" : "Active"} (${channels.length})`;
+    && (query ? channelName(channel, chat.users).toLowerCase().includes(query)
+      : showAll || channel.id === preferredId || isSidebarActive(channel)));
+  sidebar.title = query ? `Matches (${channels.length})` : `${showAll ? "All" : "Active"} (${channels.length})`;
   for (const { tab, isDM } of sidebarTabs) {
     tab.bg = isDM === showDMs ? "#403d52" : "#191724";
     tab.fg = isDM === showDMs ? "#f6c177" : "#e0def4";
@@ -610,8 +619,11 @@ async function load(channel: Channel) {
     report(String(error));
   }
 }
+search.on("input", () => updateSidebar());
 menu.on(SelectRenderableEvents.ITEM_SELECTED, (_index, option) => {
-  if (option?.value) void load(option.value);
+  if (!option?.value) return;
+  void load(option.value);
+  if (search.value && selected?.id === option.value.id) search.value = "";
 });
 async function sendMessage() {
   const text = composer.plainText.trim();
@@ -672,7 +684,19 @@ renderer.keyInput.on("keypress", key => {
     else if (["space", "return", "enter"].includes(key.name)) void toggleProfilePhotos();
     return;
   }
-  if (composer.focused && key.ctrl && key.name === "v") {
+  if (menu.focused && key.sequence === "/") {
+    key.preventDefault();
+    search.focus();
+  } else if ((search.focused || (menu.focused && search.value)) && key.name === "escape") {
+    key.preventDefault();
+    search.value = "";
+    menu.focus();
+  } else if (search.focused && ["up", "down", "return", "enter"].includes(key.name)) {
+    key.preventDefault();
+    if (key.name === "up") menu.moveUp(1);
+    else if (key.name === "down") menu.moveDown(1);
+    else if (menu.getSelectedOption()) { menu.focus(); menu.selectCurrent(); }
+  } else if (composer.focused && key.ctrl && key.name === "v") {
     key.preventDefault();
     void pasteClipboard();
   } else if (key.ctrl && key.name === "g") {
