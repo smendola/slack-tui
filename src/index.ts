@@ -246,7 +246,7 @@ function closeHelp() {
 }
 root.add(status);
 root.add(new TextRenderable(renderer, {
-  content: " F1: help · F2: settings · Ctrl+V: paste image/text · Shift+Enter: newline · Enter: send · Ctrl+D: DMs · Ctrl+R: refresh",
+  content: " F1: help · Ctrl+D: DMs · Ctrl+V: paste image/text · Shift+Enter: newline · Enter: send · Ctrl+R: refresh",
   height: 1, fg: "#908caa",
 }));
 
