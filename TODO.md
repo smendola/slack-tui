@@ -3,13 +3,13 @@
 Keep this list updated as ideas come up and work is completed. Check off finished items.
 
 - [ ] Replicate channel layout from official app
-- [ ] **Persist drafts across restarts.** Save per-workspace, per-conversation text and image drafts to disk with owner-only permissions. Autosave with a short debounce, flush on exit, restore on startup, and remove drafts after successful sends.
 - [ ] **Themes.** Add selectable color themes and persist the chosen theme in settings.
 - [ ] Investigate `conversations.history: invalid_ts_oldest` during unread checks; one rejected cursor stops the sweep for remaining conversations.
-- [ ] In DM, display avatar (if setting is YES) and status in channel title bar; and drop the @
+- [ ] Persist drafts across restarts. Save per-workspace, per-conversation text and image drafts to disk with owner-only permissions. Autosave with a short debounce, flush on exit, restore on startup, and remove drafts after successful sends. LOW PRIORITY
 
 ## Completed
 
+- [x] Show the DM participant’s name without `@` and their presence in the chat header. Show avatars in the DM list and header when profile photos are enabled.
 - [x] Add and remove emoji reactions from the inline message palette.
 - [x] Edit your sent messages without disturbing the composer draft.
 - [x] Search conversation names in the sidebar and clear the filter when opening a match.

@@ -109,12 +109,23 @@ const chatSection = new BoxRenderable(renderer, {
 });
 pane.add(chatSection);
 const heading = new TextRenderable(renderer, { content: "Select a conversation", height: 1, fg: "#9ccfd8" });
-chatSection.add(heading);
+const headingRow = new BoxRenderable(renderer, { flexDirection: "row", alignItems: "center", columnGap: 1, flexShrink: 0, backgroundColor: "#444444" });
+const headingPhoto = new BoxRenderable(renderer, { width: 4, height: 2, flexShrink: 0, visible: false });
+const headingPresence = new TextRenderable(renderer, { height: 1, visible: false, flexShrink: 0 });
+headingRow.add(headingPhoto);
+headingRow.add(heading);
+headingRow.add(headingPresence);
+chatSection.add(headingRow);
 const scroll = new ScrollBoxRenderable(renderer, { flexGrow: 1, minHeight: 0, scrollX: false, stickyScroll: true, stickyStart: "bottom" });
 chatSection.add(scroll);
 const messages = new BoxRenderable(renderer, { width: "100%", flexDirection: "column", flexShrink: 0 });
 scroll.add(messages);
 const avatarCache = new AvatarCache();
+menu.showPhotos = settings.showProfilePhotos;
+menu.avatarSource = user => {
+  const url = chat.avatars.get(user);
+  return url ? avatarCache.get(url) : undefined;
+};
 const messageImageCache = new MessageImageCache(image => chat.readImage(image));
 let messageRenderVersion = 0;
 function clearMessages() {
@@ -334,6 +345,9 @@ async function toggleProfilePhotos() {
   try {
     await saveSettings(next);
     settings = next;
+    menu.showPhotos = settings.showProfilePhotos;
+    menu.requestRender();
+    if (!closed && selected) updateHeading(selected);
     settingsLoadError = "";
     if (!closed && currentMessages.length) {
       const position = scroll.scrollTop;
@@ -395,6 +409,35 @@ let showAll = false;
 const locallyRead = new Map<string, string>();
 let checkingUnread = false;
 let checkingPresence = false;
+function updateHeadingPresence(channel: Channel) {
+  headingPresence.visible = !!channel.is_im;
+  if (!channel.is_im) return;
+  const active = channel.presence === "active";
+  headingPresence.content = active ? "● Active" : channel.presence === "away" ? "○ Away" : "· Unknown";
+  headingPresence.fg = active ? "#9ccf88" : "#908caa";
+}
+function updateHeading(channel: Channel) {
+  const name = channelName(channel, chat.users);
+  heading.content = channel.is_im ? name.replace(/^@ /, "") : name;
+  updateHeadingPresence(channel);
+  for (const child of [...headingPhoto.getChildren()]) child.destroyRecursively();
+  headingPhoto.visible = !!channel.is_im && settings.showProfilePhotos;
+  if (!headingPhoto.visible) return;
+  const initials = name.replace(/^@ /, "").trim().split(/\s+/).slice(0, 2).map(part => Array.from(part)[0]).join("").toUpperCase();
+  const fallback = new TextRenderable(renderer, { content: initials, width: 4, height: 2, fg: "#b8b8b8", bg: "#403d52", selectable: false });
+  headingPhoto.add(fallback);
+  const url = channel.user && chat.avatars.get(channel.user);
+  if (url) void avatarCache.get(url).then(bytes => {
+    if (!bytes || closed || fallback.isDestroyed) return;
+    const photo = new ImageRenderable(renderer, {
+      width: 4, height: 2, position: "absolute", fit: "cover",
+      onLoad: () => { if (!fallback.isDestroyed) fallback.visible = false; },
+      onError: () => { if (!fallback.isDestroyed) fallback.visible = true; },
+    });
+    headingPhoto.add(photo);
+    photo.source = bytes;
+  });
+}
 async function refreshPresence() {
   if (checkingPresence || closed) return;
   checkingPresence = true;
@@ -415,6 +458,7 @@ async function refreshPresence() {
         if (dm.user === user) dm.presence = presence;
       }
       menu.requestRender();
+      if (selected?.is_im && selected.user === user) updateHeadingPresence(selected);
       if (!demo) await new Promise(resolve => setTimeout(resolve, 1300));
     }
   } catch (error) {
@@ -701,7 +745,7 @@ async function load(channel: Channel) {
   if (changedChannel) restoreDraft(composer, drafts.get(channel.id) ?? "");
   updateAttachment();
   if (changedChannel) setComposerExpanded(composer.plainText.includes("\n"));
-  heading.content = channelName(channel, chat.users);
+  updateHeading(channel);
   composer.placeholder = `Message ${channelName(channel, chat.users).replace(/^[#@🔒]\s+/u, "")}`;
   currentMessages = [];
   showMessageStatus("Loading…");
