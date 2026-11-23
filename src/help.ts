@@ -17,6 +17,7 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
       "F2 — Open / close settings.",
       "Tab — Switch focus between the sidebar and composer.",
       "Up / Down, then Enter — Choose and open a conversation in the sidebar.",
+      "The arrow and gray bar mark the navigation row; orange text marks the open conversation. Moving the navigation row does not open it.",
       "/ in the sidebar, or click Search names — Search all names on the current tab, including inactive conversations. Esc clears the search.",
       "Click Channels or DMs, or press Ctrl+D, to switch lists. Group DMs are under Channels.",
       "Ctrl+L — Toggle active-only / all conversations.",

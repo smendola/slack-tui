@@ -754,6 +754,7 @@ async function load(channel: Channel) {
   pasteGeneration++;
   const changedChannel = selected?.id !== channel.id;
   selected = channel;
+  menu.activeChannelId = channel.id;
   if (changedChannel) restoreDraft(composer, drafts.get(channel.id) ?? "");
   updateAttachment();
   if (changedChannel) setComposerExpanded(composer.plainText.includes("\n"));

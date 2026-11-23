@@ -1,8 +1,37 @@
 import { expect, test } from "bun:test";
-import { TextAttributes } from "@opentui/core";
+import { TextAttributes, RGBA, SelectRenderableEvents } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { ChannelSelect } from "./channel-select";
 import type { Channel } from "./slack";
+
+test("navigation highlight moves independently of the open conversation color", async () => {
+  const screen = await createTestRenderer({ width: 24, height: 4 });
+  try {
+    const menu = new ChannelSelect(screen.renderer, {
+      width: 24, height: 4, showDescription: false,
+      options: ["Jack", "Mary"].map(name => ({ name, description: "", value: { id: name } })),
+    });
+    screen.renderer.root.add(menu);
+    menu.activeChannelId = "Jack";
+    menu.on(SelectRenderableEvents.ITEM_SELECTED, (_index, option) => { menu.activeChannelId = option.value.id; });
+    menu.focus();
+    screen.mockInput.pressArrow("down");
+    await screen.renderOnce();
+    const span = (name: string) => screen.captureSpans().lines.flatMap(line => line.spans)
+      .find(part => part.text.includes(name))!;
+    expect(span("Jack").fg.equals(RGBA.fromHex("#f6c177"))).toBe(true);
+    expect(span("Jack").bg.equals(RGBA.fromHex("#191724"))).toBe(true);
+    expect(span("Mary").fg.equals(RGBA.fromHex("#e0def4"))).toBe(true);
+    expect(span("Mary").bg.equals(RGBA.fromHex("#403d52"))).toBe(true);
+    expect(screen.captureCharFrame()).toContain("▶ Mary");
+    screen.mockInput.pressEnter();
+    await screen.renderOnce();
+    expect(span("Mary").fg.equals(RGBA.fromHex("#f6c177"))).toBe(true);
+    expect(span("Jack").fg.equals(RGBA.fromHex("#e0def4"))).toBe(true);
+  } finally {
+    await screen.dispose();
+  }
+});
 
 test("DM presence indicators distinguish active, away and unknown without losing unread bold", async () => {
   const screen = await createTestRenderer({ width: 24, height: 4 });

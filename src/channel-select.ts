@@ -11,6 +11,13 @@ const away = RGBA.fromHex("#908caa");
 
 /** Single-line, no-description menu; matches SelectRenderable's centered viewport. */
 export class ChannelSelect extends SelectRenderable {
+  private _activeChannelId?: string;
+  get activeChannelId() { return this._activeChannelId; }
+  set activeChannelId(id: string | undefined) {
+    if (id === this._activeChannelId) return;
+    this._activeChannelId = id;
+    this.requestRender();
+  }
   showPhotos = false;
   avatarSource?: (user: string) => Promise<Uint8Array | undefined> | undefined;
   private photos = new Map<string, { image?: NativeImage }>();
@@ -54,13 +61,14 @@ export class ChannelSelect extends SelectRenderable {
     for (let row = 0; row < height; row++) {
       const option = this.options[offset + row];
       if (!option) break;
-      const active = offset + row === this.getSelectedIndex();
-      const bg = active ? highlight : background;
-      if (active) buffer.fillRect(x, y + row, width, 1, bg);
+      const focused = offset + row === this.getSelectedIndex();
+      const active = this._activeChannelId !== undefined && option.value?.id === this._activeChannelId;
+      const bg = focused ? highlight : background;
+      if (focused) buffer.fillRect(x, y + row, width, 1, bg);
       buffer.pushScissorRect(x + 1, y + row, Math.max(0, width - 1 - Number(scrolls)), 1);
       const attributes = option.value?.unread ? TextAttributes.BOLD : 0;
       const color = active ? selected : normal;
-      buffer.drawText(active ? "▶ " : "  ", x + 1, y + row, color, bg);
+      buffer.drawText(focused ? "▶ " : "  ", x + 1, y + row, color, bg);
       if (option.value?.is_im) {
         let left = x + 3;
         const name = option.name.replace(/^@ /, "");
