@@ -40,17 +40,19 @@ bun run setup
 2. Below the app list, find **Your App Configuration Tokens**, click
    **Generate Token**, and select your workspace.
 3. Copy the configuration **access token**—not the refresh token—and paste it
-   into the terminal's hidden prompt.
+   into the terminal's masked prompt.
 4. The wizard creates the app and opens Slack's authorization page. Approve
    the requested permissions.
-5. Your user token is verified and saved to `.env`. Start chatting:
+5. Your user token is verified and saved to
+   `~/.config/slack-tui/credentials.env`. Start chatting:
 
    ```sh
    bun start
    ```
 
 Setup uses OAuth with PKCE and a temporary localhost callback. The configuration
-token is not saved. `.env` is gitignored and written with owner-only permissions.
+token is not saved. Credentials are written with owner-only permissions outside
+the project directory. `XDG_CONFIG_HOME` overrides the default `~/.config` directory.
 If Slack issues expiring credentials, the client saves and refreshes them automatically.
 If authorization expires and refresh is no longer possible, run setup again.
 
@@ -66,8 +68,14 @@ retrying. Existing credentials are replaced only after successful authorization.
 2. Select your workspace and paste the contents of `slack-app.yaml`.
 3. Create the app, then select **OAuth & Permissions → Install to Workspace**.
 4. Copy the **User OAuth Token** (`xoxp-…`), not a bot token.
-5. Copy `.env.example` to `.env` and replace the placeholder with your token.
+5. Create `~/.config/slack-tui/credentials.env` (or
+   `$XDG_CONFIG_HOME/slack-tui/credentials.env`) using `.env.example` as a template,
+   replace the placeholder with your token, and restrict permissions with `chmod 600`.
 6. Run `bun start`.
+
+Existing project-local `.env` credentials migrate automatically on startup.
+Only Slack credential entries are removed from the old file; unrelated settings
+are preserved. The demo does not load or migrate credentials.
 
 ## Controls
 
@@ -89,6 +97,7 @@ retrying. Existing credentials are replaced only after successful authorization.
 | Page Up / Page Down or mouse wheel | Scroll messages |
 | Ctrl+R | Refresh the current conversation |
 | Ctrl+C | Quit |
+| F2 | Open / close settings |
 
 Shift+Enter requires a terminal that reports modified Enter keys. Double-click
 can also expand the composer. Sending collapses it unless you've edited the
@@ -107,7 +116,28 @@ Ctrl+Shift+V generally deliver text rather than images.
 
 Avatars appear beside message headers, with initials as a fallback. Image quality
 depends on terminal graphics support; other terminals use a block-image fallback.
-Incoming image attachments are currently listed by filename.
+Images shared in messages appear beneath the text, including image previews
+from bot attachments. Slack-hosted images require the `files:read` permission
+included in the app manifest. Images that cannot be loaded remain labeled.
+
+Standard emoji shortcodes such as `:smile:` and `:+1:` render as Unicode emoji,
+including skin-tone modifiers. Reaction counts appear below messages.
+Workspace-specific custom emoji retain their shortcode names. Emoji appearance
+depends on your terminal's font.
+
+## Settings
+
+Press **F2** to open settings. Click **Show profile photos**, or press Space /
+Enter, to switch between Yes and No. Changes apply and save immediately.
+**Escape**, **F2**, or **Back to chat** returns to your conversation.
+
+Photos default to Yes. Turning them off removes the avatar column, giving the
+message text more room. Image attachments are unaffected.
+
+Settings are stored as a small JSON file at
+`~/.config/slack-tui/settings.json`, or
+`$XDG_CONFIG_HOME/slack-tui/settings.json` when that variable is set.
+They apply across workspaces and persist between runs.
 
 ## Current limitations
 
@@ -118,7 +148,7 @@ Incoming image attachments are currently listed by filename.
 - **Approximate active-only sidebar:** hides conversations Slack marks dormant
   and explicitly closed DMs. Ctrl+L reveals all loaded conversations. Activity
   metadata is loaded at startup; custom sections and muted preferences aren't synced.
-- No thread navigation, reactions, search, read-state updates or persistent
+- No thread navigation, adding/removing reactions, search, read-state updates or persistent
   message cache yet.
 
 If a send reports an uncertain delivery, check Slack before retrying to avoid

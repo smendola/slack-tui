@@ -5,21 +5,30 @@ import {
 } from "@opentui/core";
 import { Slack, Demo, channelName, displayText, messageText, isSidebarActive, type Channel, type Message } from "./slack";
 import { ChannelSelect } from "./channel-select";
-import { isUserToken, tokenProvider } from "./oauth";
-import { fileURLToPath } from "node:url";
+import { tokenProvider } from "./oauth";
+import { credentialsPath } from "./config-paths";
+import { loadCredentials } from "./credentials";
 import { clipboardImage, MAX_IMAGE_BYTES, type ImageAttachment } from "./attachment";
 import { AvatarCache } from "./avatars";
+import { defaultSettings, loadSettings, saveSettings, settingsPath, type Settings } from "./settings";
+import { messageImages, MessageImageCache } from "./message-images";
+import { renderEmoji } from "./emoji";
 
 const demo = process.argv.includes("--demo");
-const token = process.env.SLACK_USER_TOKEN;
-if (!demo && (!token || !isUserToken(token))) {
-  console.error("Set SLACK_USER_TOKEN to your xoxp- user OAuth token in .env.\nSee README.md for setup, or run: bun run demo");
+let settingsLoadError = "";
+let settings: Settings = await loadSettings().catch(error => {
+  settingsLoadError = `Could not load settings: ${String(error)}`;
+  return { ...defaultSettings };
+});
+const credentials = demo ? undefined : await loadCredentials().catch(error => {
+  console.error(error instanceof Error ? error.message : "Unable to load credentials.");
+  process.exit(1);
+});
+if (!demo && !credentials) {
+  console.error(`Run bun run setup to connect Slack.\nCredentials are stored in ${credentialsPath}.\nOr try: bun run demo`);
   process.exit(1);
 }
-const chat = demo ? new Demo() : new Slack(tokenProvider({
-  token: token!, clientId: process.env.SLACK_CLIENT_ID, refreshToken: process.env.SLACK_REFRESH_TOKEN,
-  expiresAt: process.env.SLACK_TOKEN_EXPIRES_AT ? Number(process.env.SLACK_TOKEN_EXPIRES_AT) : undefined,
-}, fileURLToPath(new URL("../.env", import.meta.url))));
+const chat = demo ? new Demo() : new Slack(tokenProvider(credentials!, credentialsPath));
 const renderer = await createCliRenderer({ exitOnCtrlC: true });
 const root = new BoxRenderable(renderer, { width: "100%", height: "100%", flexDirection: "column", backgroundColor: "#191724" });
 renderer.root.add(root);
@@ -78,6 +87,7 @@ chatSection.add(scroll);
 const messages = new BoxRenderable(renderer, { width: "100%", flexDirection: "column", flexShrink: 0 });
 scroll.add(messages);
 const avatarCache = new AvatarCache();
+const messageImageCache = new MessageImageCache(image => chat.readImage(image));
 let messageRenderVersion = 0;
 function clearMessages() {
   messageRenderVersion++;
@@ -143,9 +153,71 @@ function setComposerExpanded(expanded: boolean) {
   if (expanded) composer.focus();
 }
 const status = new TextRenderable(renderer, { content: "Connecting…", height: 1, fg: "#908caa" });
+let settingsOpen = false;
+let settingsSaving = false;
+let returnToComposer = false;
+const settingsScreen = new BoxRenderable(renderer, {
+  flexGrow: 1, minHeight: 0, flexDirection: "column", padding: 1,
+  border: true, title: "Settings", borderColor: "#524f67", visible: false, focusable: true,
+});
+root.add(settingsScreen);
+const photosSetting = new TextRenderable(renderer, {
+  content: "", fg: "#e0def4", height: 2,
+  onMouseDown(event) {
+    if (event.button === 0) { void toggleProfilePhotos(); event.stopPropagation(); }
+  },
+});
+settingsScreen.add(photosSetting);
+const settingsNotice = new TextRenderable(renderer, { content: "", fg: "#908caa", wrapMode: "word" });
+settingsScreen.add(settingsNotice);
+settingsScreen.add(new TextRenderable(renderer, {
+  content: "\n[Back to chat]  Esc / F2", fg: "#9ccfd8", height: 2,
+  onMouseDown(event) { if (event.button === 0) { closeSettings(); event.stopPropagation(); } },
+}));
+function updateSettingsScreen() {
+  photosSetting.content = `Show profile photos:  ${settings.showProfilePhotos ? "[Yes]  No" : "Yes  [No]"}${settingsSaving ? "  Saving…" : ""}`;
+  settingsNotice.content = `${settingsLoadError || "Click or press Space / Enter to toggle. Changes save automatically."}\n\nStored in ${settingsPath}`;
+}
+function openSettings() {
+  if (settingsOpen) return;
+  returnToComposer = composer.focused;
+  settingsOpen = true;
+  body.visible = false;
+  settingsScreen.visible = true;
+  updateSettingsScreen();
+  settingsScreen.focus();
+}
+function closeSettings() {
+  if (!settingsOpen) return;
+  settingsOpen = false;
+  settingsScreen.visible = false;
+  body.visible = true;
+  if (returnToComposer) composer.focus(); else menu.focus();
+}
+async function toggleProfilePhotos() {
+  if (settingsSaving || !settingsOpen) return;
+  settingsSaving = true;
+  updateSettingsScreen();
+  const next = { ...settings, showProfilePhotos: !settings.showProfilePhotos };
+  try {
+    await saveSettings(next);
+    settings = next;
+    settingsLoadError = "";
+    if (!closed && currentMessages.length) {
+      const position = scroll.scrollTop;
+      renderMessages();
+      scroll.scrollTo(position);
+    }
+  } catch (error) {
+    settingsLoadError = `Could not save settings: ${String(error)}`;
+  } finally {
+    settingsSaving = false;
+    if (!closed) updateSettingsScreen();
+  }
+}
 root.add(status);
 root.add(new TextRenderable(renderer, {
-  content: " Ctrl+V: paste image/text · Ctrl+G: remove image · Shift+Enter: expand/newline · Enter: send · Ctrl+D: DMs · Ctrl+R: refresh",
+  content: " F2: settings · Ctrl+V: paste image/text · Ctrl+G: remove image · Shift+Enter: newline · Enter: send · Ctrl+D: DMs · Ctrl+R: refresh",
   height: 1, fg: "#908caa",
 }));
 
@@ -225,13 +297,20 @@ function renderMessages() {
   for (const message of currentMessages) {
     const name = displayText(message.username || chat.users.get(message.user ?? "") || message.bot_profile?.name || message.user || message.bot_id || "Slack", chat.users);
     const time = new Date(Number(message.ts) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    const files = message.files?.map(file => `[file: ${file.name ?? "attachment"}]`).join("\n");
-    const row = new BoxRenderable(renderer, { width: "100%", flexDirection: "row", flexShrink: 0, minHeight: 2, marginBottom: 1, columnGap: 1 });
-    const avatarColumn = new BoxRenderable(renderer, { width: 4, height: 2, flexShrink: 0 });
-    const initials = name.trim().split(/\s+/).slice(0, 2).map(part => Array.from(part)[0] ?? "").join("").toUpperCase();
-    const fallback = new TextRenderable(renderer, { content: initials, width: 4, height: 2, fg: "#b8b8b8", bg: "#403d52" });
-    avatarColumn.add(fallback);
-    row.add(avatarColumn);
+    const images = messageImages(message);
+    const imageLabels = new Set(images.map(image => image.label));
+    const files = message.files?.filter(file => !imageLabels.has(file.name || file.title || "Image"))
+      .map(file => `[file: ${file.name ?? "attachment"}]`).join("\n");
+    const row = new BoxRenderable(renderer, { width: "100%", flexDirection: "row", flexShrink: 0, minHeight: settings.showProfilePhotos ? 2 : 0, marginBottom: 1, columnGap: settings.showProfilePhotos ? 1 : 0 });
+    let avatarColumn: BoxRenderable | undefined;
+    let fallback: TextRenderable | undefined;
+    if (settings.showProfilePhotos) {
+      avatarColumn = new BoxRenderable(renderer, { width: 4, height: 2, flexShrink: 0 });
+      const initials = name.trim().split(/\s+/).slice(0, 2).map(part => Array.from(part)[0] ?? "").join("").toUpperCase();
+      fallback = new TextRenderable(renderer, { content: initials, width: 4, height: 2, fg: "#b8b8b8", bg: "#403d52" });
+      avatarColumn.add(fallback);
+      row.add(avatarColumn);
+    }
     const textColumn = new BoxRenderable(renderer, { flexDirection: "column", flexGrow: 1, flexBasis: 0, minWidth: 0 });
     textColumn.add(new TextRenderable(renderer, {
       width: "100%", flexShrink: 0, wrapMode: "word",
@@ -241,18 +320,61 @@ function renderMessages() {
       width: "100%", flexShrink: 0, fg: "#e0def4", wrapMode: "word",
       content: `${messageText(message, chat.users)}${files ? `\n${files}` : ""}${message.reply_count ? `\n↳ ${message.reply_count} replies (not loaded)` : ""}`,
     }));
+    for (const source of images) {
+      const label = new TextRenderable(renderer, {
+        content: `[image: ${displayText(source.label, chat.users)}] Loading…`,
+        fg: "#908caa", width: "100%", flexShrink: 0, wrapMode: "word",
+      });
+      textColumn.add(label);
+      let aspect = 1;
+      const image = new ImageRenderable(renderer, {
+        width: "100%", maxWidth: 60, height: 8, flexShrink: 0, fit: "fit",
+        onLoad: loaded => {
+          if (closed || version !== messageRenderVersion) return;
+          aspect = loaded.height / Math.max(1, loaded.width);
+          resizeImage();
+          label.content = displayText(source.label, chat.users);
+        },
+        onError: () => {
+          if (closed || version !== messageRenderVersion) return;
+          image.visible = false;
+          label.content = `[image: ${displayText(source.label, chat.users)}] Preview unavailable`;
+        },
+      });
+      function resizeImage() {
+        const height = Math.max(2, Math.min(12, Math.ceil(image.width * aspect / 2)));
+        if (image.height !== height) image.height = height;
+      }
+      image.on("resize", resizeImage);
+      textColumn.add(image);
+      void messageImageCache.get(source).then(bytes => {
+        if (!closed && version === messageRenderVersion) image.source = bytes;
+      }).catch(error => {
+        if (closed || version !== messageRenderVersion) return;
+        image.visible = false;
+        label.content = `[image: ${displayText(source.label, chat.users)}] ${displayText(String(error), chat.users)}`;
+      });
+    }
+    if (message.reactions?.length) {
+      textColumn.add(new TextRenderable(renderer, {
+        width: "100%", flexShrink: 0, wrapMode: "word", fg: "#9ccfd8",
+        content: message.reactions.map(reaction => `${renderEmoji(`:${reaction.name}:`)} ${reaction.count}`).join("  "),
+      }));
+    }
     row.add(textColumn);
     messages.add(row);
     const url = message.icons?.image_48 || message.bot_profile?.icons?.image_72 || message.bot_profile?.icons?.image_48 || chat.avatars.get(message.user ?? "");
-    if (url) {
+    if (url && avatarColumn && fallback) {
+      const avatarTarget = avatarColumn;
+      const initialsFallback = fallback;
       void avatarCache.get(url).then(bytes => {
         if (!bytes || closed || version !== messageRenderVersion) return;
         const avatar = new ImageRenderable(renderer, {
           width: 4, height: 2, position: "absolute", top: 0, left: 0, fit: "cover",
-          onLoad: () => { if (!closed && version === messageRenderVersion) fallback.visible = false; },
-          onError: () => { if (!closed && version === messageRenderVersion) fallback.visible = true; },
+          onLoad: () => { if (!closed && version === messageRenderVersion) initialsFallback.visible = false; },
+          onError: () => { if (!closed && version === messageRenderVersion) initialsFallback.visible = true; },
         });
-        avatarColumn.add(avatar);
+        avatarTarget.add(avatar);
         avatar.source = bytes;
       });
     }
@@ -322,6 +444,17 @@ async function sendMessage() {
   } finally { sending = false; }
 }
 renderer.keyInput.on("keypress", key => {
+  if (key.name === "f2") {
+    key.preventDefault();
+    if (settingsOpen) closeSettings(); else openSettings();
+    return;
+  }
+  if (settingsOpen) {
+    key.preventDefault();
+    if (key.name === "escape") closeSettings();
+    else if (["space", "return", "enter"].includes(key.name)) void toggleProfilePhotos();
+    return;
+  }
   if (composer.focused && key.ctrl && key.name === "v") {
     key.preventDefault();
     void pasteClipboard();

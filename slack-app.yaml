@@ -16,6 +16,7 @@ oauth_config:
       - users:read
       - chat:write
       - files:write
+      - files:read
 settings:
   org_deploy_enabled: false
   socket_mode_enabled: false

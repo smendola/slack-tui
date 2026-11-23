@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { credentialsPath } from "./config-paths";
+import { loadCredentials } from "./credentials";
 import { authorizationURL, createPKCE, exchangeUserToken, saveUserToken, slackRequest, startCallback, type App, type Manifest } from "./oauth";
 
 const root = new URL("../", import.meta.url);
-const envPath = fileURLToPath(new URL(".env", root));
 
 function openBrowser(url: string) {
   const command = process.platform === "darwin" ? "open" : "xdg-open";
@@ -16,7 +16,7 @@ function openBrowser(url: string) {
 
 function readSecret(signal: AbortSignal): Promise<string> {
   if (!process.stdin.isTTY) throw new Error("Run setup in an interactive terminal to paste the configuration token.");
-  process.stdout.write("Configuration access token (hidden): ");
+  process.stdout.write("Configuration access token (masked): ");
   return new Promise((resolve, reject) => {
     let input = "";
     const previousRaw = process.stdin.isRaw;
@@ -33,8 +33,15 @@ function readSecret(signal: AbortSignal): Promise<string> {
       for (const char of data.toString().replace(/\x1b\[(?:200|201)~/g, "")) {
         if (char === "\x03") { onAbort(); return; }
         if (char === "\r" || char === "\n") { cleanup(); resolve(input.trim()); return; }
-        if (char === "\x7f" || char === "\b") input = input.slice(0, -1);
-        else if (char >= " " && char <= "~") input += char;
+        if (char === "\x7f" || char === "\b") {
+          if (input.length) {
+            input = input.slice(0, -1);
+            process.stdout.write("\b \b");
+          }
+        } else if (char >= " " && char <= "~") {
+          input += char;
+          process.stdout.write("*");
+        }
       }
     };
     signal.addEventListener("abort", onAbort, { once: true });
@@ -59,11 +66,7 @@ async function setup() {
     return;
   }
   if (process.argv.slice(2).some(arg => arg !== "--replace")) throw new Error("Unknown option. Run bun run setup --help.");
-  const existing = await Bun.file(envPath).text().catch(error => {
-    if (error.code === "ENOENT") return "";
-    throw error;
-  });
-  if (!process.argv.includes("--replace") && (process.env.SLACK_USER_TOKEN || /^\s*(?:export\s+)?SLACK_USER_TOKEN\s*=/m.test(existing))) {
+  if (!process.argv.includes("--replace") && await loadCredentials()) {
     throw new Error("A Slack token is already configured. Run bun start, or bun run setup --replace to connect a new app.");
   }
   const controller = new AbortController();
@@ -82,7 +85,7 @@ async function setup() {
     console.log("  2. Below the app list, find Your App Configuration Tokens.");
     console.log("  3. Click Generate Token and select the workspace where you want to use slack-tui.");
     console.log("  4. Copy the generated access token (not the refresh token).");
-    console.log("  5. Return here, paste it into the hidden prompt, and press Enter.");
+    console.log("  5. Return here, paste it into the masked prompt, and press Enter.");
     console.log("\nThen the wizard will create the app and open Slack's permission-approval page.");
     console.log("The configuration token will not be saved.\n");
     openBrowser("https://api.slack.com/apps");
@@ -107,9 +110,9 @@ async function setup() {
     if (result.error) throw new Error("Slack authorization was declined or requires administrator approval.");
     const credentials = await exchangeUserToken(app, result.code!, redirect, manifest.oauth_config.scopes.user, pkce.verifier, signal);
     const identity = await slackRequest<{ team: string; user: string }>("auth.test", {}, `Bearer ${credentials.token}`, signal);
-    await saveUserToken(envPath, credentials.token, credentials);
+    await saveUserToken(credentialsPath, credentials.token, credentials);
     saved = true;
-    console.log(`Connected to ${identity.team} as ${identity.user}. Saved user token to .env (owner-only permissions).`);
+    console.log(`Connected to ${identity.team} as ${identity.user}. Saved credentials to ${credentialsPath} (owner-only permissions).`);
     console.log("Run bun start to open Slack.");
   } finally {
     process.off("SIGINT", cancel);

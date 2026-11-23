@@ -11,7 +11,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@opentui/core": "0.9.7"
+    "@opentui/core": "0.9.7",
+    "node-emoji": "^2.2.0"
   },
   "devDependencies": {
     "@types/bun": "latest",

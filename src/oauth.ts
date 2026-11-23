@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { chmod, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 
 export type Manifest = {
   display_information: { name: string };
@@ -126,6 +127,7 @@ export function updateEnv(contents: string, token: string, credentials?: Credent
 }
 
 export async function saveUserToken(path: string, token: string, credentials?: Credentials) {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const contents = await readFile(path, "utf8").catch(error => {
     if (error.code === "ENOENT") return "";
     throw error;

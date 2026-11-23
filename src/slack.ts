@@ -1,4 +1,13 @@
 import { type ImageAttachment } from "./attachment";
+import { downloadMessageImage, type MessageImage } from "./message-images";
+import { renderEmoji } from "./emoji";
+
+export type MessageFile = {
+  name?: string; title?: string; mimetype?: string; filetype?: string;
+  thumb_360?: string; thumb_480?: string; thumb_720?: string; url_private?: string;
+  is_external?: boolean; mode?: string; previewBytes?: Uint8Array;
+};
+type ImageBlock = { type: string; image_url?: string; alt_text?: string; accessory?: { type: string; image_url?: string; alt_text?: string } };
 
 export type Channel = {
   id: string; name?: string; user?: string; is_im?: boolean; is_mpim?: boolean; is_private?: boolean;
@@ -9,10 +18,13 @@ export type Message = {
   ts: string; text?: string; user?: string; bot_id?: string;
   username?: string; icons?: { image_48?: string };
   bot_profile?: { name?: string; icons?: { image_48?: string; image_72?: string } };
-  reply_count?: number; files?: { name?: string }[];
+  reply_count?: number; files?: MessageFile[];
+  blocks?: ImageBlock[];
+  reactions?: { name: string; count: number }[];
   attachments?: {
     pretext?: string; author_name?: string; title?: string; title_link?: string;
     text?: string; fallback?: string; footer?: string;
+    image_url?: string; thumb_url?: string; blocks?: ImageBlock[];
     fields?: { title?: string; value?: string }[];
     actions?: { text?: string; url?: string }[];
   }[];
@@ -25,6 +37,7 @@ export interface Chat {
   channels(): Promise<Channel[]>;
   history(channel: string): Promise<Message[]>;
   send(channel: string, text: string, image?: ImageAttachment): Promise<Message>;
+  readImage(image: MessageImage): Promise<Uint8Array>;
 }
 
 export class Slack implements Chat {
@@ -32,6 +45,7 @@ export class Slack implements Chat {
   avatars = new Map<string, string>();
   private blockedUntil = new Map<string, number>();
   private userId?: string;
+  private grantedScopes?: Set<string>;
   constructor(private token: string | (() => Promise<string>)) {}
 
   private async call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
@@ -51,6 +65,8 @@ export class Slack implements Chat {
         : write ? JSON.stringify(params) : undefined,
       signal: AbortSignal.timeout(20_000),
     });
+    const scopes = response.headers.get("x-oauth-scopes");
+    if (scopes !== null) this.grantedScopes = new Set(scopes.split(",").map(scope => scope.trim()));
     if (response.status === 429) {
       const seconds = Number(response.headers.get("retry-after")) || 60;
       this.blockedUntil.set(method, Date.now() + seconds * 1000);
@@ -131,10 +147,16 @@ export class Slack implements Chat {
         channel_id: channel, ...(text ? { initial_comment: text } : {}),
       });
       // Optimistic display only; a refresh replaces this with Slack's message.
-      return { ts: String(Date.now() / 1000), user: this.userId, text, files: [{ name: image.filename }] };
+      return { ts: String(Date.now() / 1000), user: this.userId, text, files: [{ name: image.filename, mimetype: image.mimeType, previewBytes: image.bytes }] };
     }
     const data = await this.call<{ message: Message }>("chat.postMessage", { channel, text });
     return data.message;
+  }
+  readImage(image: MessageImage) {
+    if (!image.bytes && image.private && this.grantedScopes && !this.grantedScopes.has("files:read")) {
+      return Promise.reject(new Error("Missing files:read permission. Add it to User Token Scopes and reauthorize the app."));
+    }
+    return downloadMessageImage(image, async () => typeof this.token === "function" ? this.token() : this.token);
   }
 }
 
@@ -191,7 +213,7 @@ export function messageText(message: Message, users: Map<string, string>) {
     return [content || attachment.fallback, ...links, attachment.footer]
       .filter(part => part?.trim()).join("\n");
   });
-  return displayText([message.text, ...attachments].filter(part => part?.trim()).join("\n\n"), users);
+  return renderEmoji(displayText([message.text, ...attachments].filter(part => part?.trim()).join("\n\n"), users));
 }
 
 export class Demo implements Chat {
@@ -203,15 +225,29 @@ export class Demo implements Chat {
       { ts: "1770000060", user: "alice", text: "Tab switches panes. Enter opens a channel or sends a message.\nCtrl+R refreshes. Page Up/Down scrolls." },
       { ts: "1770000120", user: "you", text: "This is an offline demo. Messages stay in memory; nothing goes to Slack." },
     ]],
-    ["dev", [{ ts: "1770000300", user: "alice", text: "The smallest possible chat client. Try sending a message!" }]],
+    ["dev", [
+      { ts: "1770000300", user: "alice", text: "The smallest possible chat client. Try sending a message!" },
+      {
+        ts: "1770000360", user: "alice", text: "Images in chat! :tada: :smile: :+1::skin-tone-3:",
+        reactions: [{ name: "heart", count: 2 }, { name: "+1", count: 3 }],
+        files: [{
+          name: "demo-gradient.png", mimetype: "image/png",
+          previewBytes: new Uint8Array(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAABAAAAAICAIAAAB/FOjAAAAA9UlEQVR4nAXBoQ3AIBRAwe7CAAzAAAyAw2BJ8DBA8U2wGBzuGyx5DNABuk7vLuXRHuOxHucJnuQpntvzeLpnepbneF7P57lUREdMxEZcJERSpETuyBPpkRlZkRN5I1/kUhmdMRmbcZmQSZmSuTNPpmdmZmVO5s18mUtVdMVUbMVVQiVVSuWuPJVemZVVOZW38lUu1dAN07AN1wiN1CiNu/E0emM2VuM03sbXuNRAD8zADtwgDNKgDO7BM+iDOViDM3gH3+BSghaMYAUnBCEJRbiFR+jCFJZwhFf4hEtt9MZs7MZtwiZtyubePJu+mZu1OZt3821+L3PjAXKpx9wAAAAASUVORK5CYII=", "base64")),
+        }],
+      },
+    ]],
     ["dm", [{ ts: "1770000400", user: "alice", text: "Hello <@you> — DMs work here too." }]],
   ]);
   async connect() { return { team: "Offline demo", user: "You" }; }
   async channels() { return [{ id: "general", name: "general" }, { id: "dev", name: "dev" }, { id: "dm", is_im: true, user: "alice" }]; }
   async history(channel: string) { return [...(this.messages.get(channel) ?? [])]; }
   async send(channel: string, text: string, image?: ImageAttachment) {
-    const message = { ts: String(Date.now() / 1000), user: "you", text, ...(image ? { files: [{ name: image.filename }] } : {}) };
+    const message = { ts: String(Date.now() / 1000), user: "you", text, ...(image ? { files: [{ name: image.filename, mimetype: image.mimeType, previewBytes: image.bytes }] } : {}) };
     this.messages.set(channel, [...(this.messages.get(channel) ?? []), message]);
     return message;
+  }
+  readImage(image: MessageImage) {
+    if (!image.bytes) return Promise.reject(new Error("Offline demo has no remote image"));
+    return Promise.resolve(image.bytes);
   }
 }
