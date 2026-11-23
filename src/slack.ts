@@ -9,10 +9,12 @@ export type MessageFile = {
 };
 type ImageBlock = { type: string; image_url?: string; alt_text?: string; accessory?: { type: string; image_url?: string; alt_text?: string } };
 
+export type Presence = "active" | "away";
 export type Channel = {
   id: string; name?: string; user?: string; is_im?: boolean; is_mpim?: boolean; is_private?: boolean;
   is_open?: boolean;
   unread?: boolean;
+  presence?: Presence;
   last_read?: string;
   unread_count_display?: number;
   unread_count?: number;
@@ -42,6 +44,7 @@ export interface Chat {
   history(channel: string): Promise<Message[]>;
   unread(channel: string, locallyRead?: string): Promise<boolean | undefined>;
   markRead(channel: string, ts: string): Promise<void>;
+  presence(user: string): Promise<Presence | undefined>;
   send(channel: string, text: string, image?: ImageAttachment): Promise<Message>;
   readImage(image: MessageImage): Promise<Uint8Array>;
 }
@@ -136,6 +139,16 @@ export class Slack implements Chat {
   async history(channel: string) {
     const data = await this.call<{ messages: Message[] }>("conversations.history", { channel, limit: 50 });
     return data.messages.toReversed();
+  }
+  async presence(user: string): Promise<Presence | undefined> {
+    try {
+      const data = await this.call<{ presence?: string }>("users.getPresence", { user });
+      return data.presence === "active" || data.presence === "away" ? data.presence : undefined;
+    } catch (error) {
+      // Some external users cannot be looked up. Unknown is not away.
+      if (/users\.getPresence: (user_not_found|user_not_visible)\b/.test(String(error))) return undefined;
+      throw error;
+    }
   }
   async markRead(channel: string, ts: string): Promise<void> {
     // Serialize updates per conversation so a slower, older load cannot rewind it.
@@ -291,6 +304,7 @@ export class Demo implements Chat {
   async channels() { return [{ id: "general", name: "general" }, { id: "dev", name: "dev" }, { id: "dm", is_im: true, user: "alice" }]; }
   async history(channel: string) { return [...(this.messages.get(channel) ?? [])]; }
   async markRead(_channel: string, _ts: string) {}
+  async presence(user: string): Promise<Presence> { return user === "alice" ? "active" : "away"; }
   async unread(channel: string, locallyRead?: string) {
     const latest = this.messages.get(channel)?.at(-1)?.ts;
     return !!latest && (!locallyRead || laterTimestamp(locallyRead, latest) !== locallyRead);

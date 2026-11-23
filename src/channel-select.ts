@@ -5,6 +5,8 @@ const selected = RGBA.fromHex("#f6c177");
 const background = RGBA.fromHex("#191724");
 const highlight = RGBA.fromHex("#403d52");
 const indicator = RGBA.fromHex("#524f67");
+const online = RGBA.fromHex("#9ccf88");
+const away = RGBA.fromHex("#908caa");
 
 /** Single-line, no-description menu; matches SelectRenderable's centered viewport. */
 export class ChannelSelect extends SelectRenderable {
@@ -32,8 +34,17 @@ export class ChannelSelect extends SelectRenderable {
       const bg = active ? highlight : background;
       if (active) buffer.fillRect(x, y + row, width, 1, bg);
       buffer.pushScissorRect(x + 1, y + row, Math.max(0, width - 1 - Number(scrolls)), 1);
-      buffer.drawText(`${active ? "▶ " : "  "}${option.name}`, x + 1, y + row,
-        active ? selected : normal, bg, option.value?.unread ? TextAttributes.BOLD : 0);
+      const attributes = option.value?.unread ? TextAttributes.BOLD : 0;
+      const color = active ? selected : normal;
+      buffer.drawText(active ? "▶ " : "  ", x + 1, y + row, color, bg);
+      if (option.value?.is_im) {
+        const presence = option.value.presence;
+        buffer.drawText(presence === "active" ? "●" : presence === "away" ? "○" : "·",
+          x + 3, y + row, presence === "active" ? online : away, bg);
+        buffer.drawText(` ${option.name.replace(/^@ /, "")}`, x + 4, y + row, color, bg, attributes);
+      } else {
+        buffer.drawText(option.name, x + 3, y + row, color, bg, attributes);
+      }
       buffer.popScissorRect();
     }
     if (scrolls && height > 0 && width > 0) {

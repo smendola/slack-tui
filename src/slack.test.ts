@@ -4,6 +4,31 @@ import { Slack, displayText, messageText, channelName, compactName, isSidebarAct
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
+test("presence queries the DM participant and preserves active, away and unknown states", async () => {
+  const states = ["active", "away", "unexpected"];
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    const url = new URL(String(input));
+    expect(url.pathname).toBe("/api/users.getPresence");
+    expect(url.searchParams.get("user")).toBe("UALICE");
+    expect(init?.method).toBe("GET");
+    expect(init?.body).toBeUndefined();
+    return Response.json({ ok: true, presence: states.shift() });
+  }) as unknown as typeof fetch;
+  const slack = new Slack("test");
+  expect(await slack.presence("UALICE")).toBe("active");
+  expect(await slack.presence("UALICE")).toBe("away");
+  expect(await slack.presence("UALICE")).toBeUndefined();
+});
+
+test("unavailable users have unknown presence, but authorization errors surface", async () => {
+  let error = "user_not_found";
+  globalThis.fetch = (async () => Response.json({ ok: false, error })) as unknown as typeof fetch;
+  const slack = new Slack("test");
+  expect(await slack.presence("UEXTERNAL")).toBeUndefined();
+  error = "missing_scope";
+  await expect(slack.presence("UEXTERNAL")).rejects.toThrow("missing_scope");
+});
+
 test("read updates POST the exact cursor, serialize requests, and never rewind", async () => {
   const timestamps: string[] = [];
   let inFlight = 0;

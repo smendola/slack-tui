@@ -95,7 +95,7 @@ are preserved. The demo does not load or migrate credentials.
 | Double-click composer | Expand the composer |
 | Escape | Collapse the composer, keeping the draft |
 | Page Up / Page Down or mouse wheel | Scroll messages |
-| Ctrl+R | Refresh the current conversation and unread status |
+| Ctrl+R | Refresh the current conversation, unread status and DM presence |
 | Ctrl+C | Quit |
 | F2 | Open / close settings |
 
@@ -138,6 +138,16 @@ Settings are stored as a small JSON file at
 `~/.config/slack-tui/settings.json`, or
 `$XDG_CONFIG_HOME/slack-tui/settings.json` when that variable is set.
 They apply across workspaces and persist between runs.
+
+## DM presence
+
+The DM sidebar shows **●** in green for active users, **○** for away, and **·**
+when presence is unknown. These reflect Slack's active/away status, including
+manually setting yourself away.
+
+Presence is checked at startup, when switching to DMs, and with **Ctrl+R**.
+Checks run gradually in the background; they are snapshots, not live updates.
+The existing `users:read` permission covers presence—no extra scopes are needed.
 
 ## Unread status
 

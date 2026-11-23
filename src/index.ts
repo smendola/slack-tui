@@ -227,6 +227,35 @@ let showDMs = false;
 let showAll = false;
 const locallyRead = new Map<string, string>();
 let checkingUnread = false;
+let checkingPresence = false;
+async function refreshPresence() {
+  if (checkingPresence || closed) return;
+  checkingPresence = true;
+  const visible = new Set(menu.options.map(option => option.value.id));
+  const channels = allChannels.filter(channel => channel.is_im && channel.user)
+    .sort((a, b) => Number(visible.has(b.id)) - Number(visible.has(a.id))
+      || Number(isSidebarActive(b)) - Number(isSidebarActive(a)));
+  const checked = new Set<string>();
+  try {
+    for (const channel of channels) {
+      if (closed) break;
+      const user = channel.user!;
+      if (checked.has(user)) continue;
+      checked.add(user);
+      const presence = await chat.presence(user);
+      if (closed) break;
+      for (const dm of channels) {
+        if (dm.user === user) dm.presence = presence;
+      }
+      menu.requestRender();
+      if (!demo) await new Promise(resolve => setTimeout(resolve, 1300));
+    }
+  } catch (error) {
+    report(`Presence check paused: ${String(error)} · Ctrl+R to retry`);
+  } finally {
+    checkingPresence = false;
+  }
+}
 async function refreshUnread() {
   if (checkingUnread || closed) return;
   checkingUnread = true;
@@ -525,6 +554,7 @@ renderer.keyInput.on("keypress", key => {
     key.preventDefault();
     showDMs = !showDMs;
     updateSidebar();
+    if (showDMs) void refreshPresence();
     menu.focus();
   } else if (key.ctrl && key.name === "l") {
     key.preventDefault();
@@ -535,6 +565,7 @@ renderer.keyInput.on("keypress", key => {
     key.preventDefault();
     if (selected) void load(selected);
     void refreshUnread();
+    void refreshPresence();
   } else if (!composerExpanded && (key.name === "pageup" || key.name === "pagedown")) {
     key.preventDefault();
     scroll.scrollBy(key.name === "pageup" ? -10 : 10);
@@ -551,6 +582,7 @@ try {
     showDMs = channels.length > 0 && channels.every(channel => channel.is_im);
     updateSidebar();
     void refreshUnread();
+    void refreshPresence();
     const first = menu.getSelectedOption()?.value as Channel | undefined;
     if (first) await load(first);
     else if (channels.length) report("No active conversations here · Ctrl+L: show all · Ctrl+D: DMs/channels");
