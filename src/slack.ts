@@ -12,6 +12,10 @@ type ImageBlock = { type: string; image_url?: string; alt_text?: string; accesso
 export type Channel = {
   id: string; name?: string; user?: string; is_im?: boolean; is_mpim?: boolean; is_private?: boolean;
   is_open?: boolean;
+  unread?: boolean;
+  last_read?: string;
+  unread_count_display?: number;
+  unread_count?: number;
   properties?: { has_custom_mpdm_name?: boolean; is_dormant?: boolean };
 };
 export type Message = {
@@ -36,6 +40,8 @@ export interface Chat {
   connect(): Promise<{ team: string; user: string }>;
   channels(): Promise<Channel[]>;
   history(channel: string): Promise<Message[]>;
+  unread(channel: string, locallyRead?: string): Promise<boolean | undefined>;
+  markRead(channel: string, ts: string): Promise<void>;
   send(channel: string, text: string, image?: ImageAttachment): Promise<Message>;
   readImage(image: MessageImage): Promise<Uint8Array>;
 }
@@ -46,13 +52,15 @@ export class Slack implements Chat {
   private blockedUntil = new Map<string, number>();
   private userId?: string;
   private grantedScopes?: Set<string>;
+  private readUpdates = new Map<string, Promise<void>>();
+  private confirmedRead = new Map<string, string>();
   constructor(private token: string | (() => Promise<string>)) {}
 
   private async call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     const wait = Math.ceil(((this.blockedUntil.get(method) ?? 0) - Date.now()) / 1000);
     if (wait > 0) throw new Error(`Rate limited: retry ${method} in ${wait}s.`);
     const form = method.startsWith("files.");
-    const write = method === "chat.postMessage" || form;
+    const write = method === "chat.postMessage" || method === "conversations.mark" || form;
     const url = new URL(`https://slack.com/api/${method}`);
     if (!write) {
       for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
@@ -129,6 +137,36 @@ export class Slack implements Chat {
     const data = await this.call<{ messages: Message[] }>("conversations.history", { channel, limit: 50 });
     return data.messages.toReversed();
   }
+  async markRead(channel: string, ts: string): Promise<void> {
+    // Serialize updates per conversation so a slower, older load cannot rewind it.
+    const previous = this.readUpdates.get(channel);
+    const update = (async () => {
+      await previous?.catch(() => {});
+      const confirmed = this.confirmedRead.get(channel);
+      if (confirmed && confirmed !== ts && laterTimestamp(confirmed, ts) === confirmed) return;
+      await this.call("conversations.mark", { channel, ts });
+      this.confirmedRead.set(channel, ts);
+    })();
+    this.readUpdates.set(channel, update);
+    try {
+      await update;
+    } finally {
+      if (this.readUpdates.get(channel) === update) this.readUpdates.delete(channel);
+    }
+  }
+  async unread(channel: string, locallyRead?: string): Promise<boolean | undefined> {
+    const { channel: info } = await this.call<{ channel: Channel }>("conversations.info", { channel });
+    if (!locallyRead) {
+      const count = info.unread_count_display ?? info.unread_count;
+      if (count !== undefined) return count > 0;
+    }
+    const cursor = laterTimestamp(info.last_read, locallyRead);
+    if (!cursor) return undefined; // Missing metadata is not evidence of unread messages.
+    const { messages } = await this.call<{ messages: Message[] }>("conversations.history", {
+      channel, oldest: cursor, inclusive: false, limit: 1,
+    });
+    return messages.length > 0;
+  }
   async send(channel: string, text: string, image?: ImageAttachment): Promise<Message> {
     if (image) {
       const upload = await this.call<{ upload_url: string; file_id: string }>("files.getUploadURLExternal", {
@@ -158,6 +196,17 @@ export class Slack implements Chat {
     }
     return downloadMessageImage(image, async () => typeof this.token === "function" ? this.token() : this.token);
   }
+}
+
+export function laterTimestamp(a?: string, b?: string): string | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  // Slack timestamps have microsecond precision; avoid floating-point rounding.
+  const parts = (value: string) => {
+    const [seconds, fraction = ""] = value.split(".");
+    return BigInt(seconds) * 1_000_000n + BigInt(fraction.padEnd(6, "0").slice(0, 6));
+  };
+  return parts(a) >= parts(b) ? a : b;
 }
 
 export function compactName(name: string) {
@@ -241,6 +290,11 @@ export class Demo implements Chat {
   async connect() { return { team: "Offline demo", user: "You" }; }
   async channels() { return [{ id: "general", name: "general" }, { id: "dev", name: "dev" }, { id: "dm", is_im: true, user: "alice" }]; }
   async history(channel: string) { return [...(this.messages.get(channel) ?? [])]; }
+  async markRead(_channel: string, _ts: string) {}
+  async unread(channel: string, locallyRead?: string) {
+    const latest = this.messages.get(channel)?.at(-1)?.ts;
+    return !!latest && (!locallyRead || laterTimestamp(locallyRead, latest) !== locallyRead);
+  }
   async send(channel: string, text: string, image?: ImageAttachment) {
     const message = { ts: String(Date.now() / 1000), user: "you", text, ...(image ? { files: [{ name: image.filename, mimetype: image.mimeType, previewBytes: image.bytes }] } : {}) };
     this.messages.set(channel, [...(this.messages.get(channel) ?? []), message]);

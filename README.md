@@ -95,7 +95,7 @@ are preserved. The demo does not load or migrate credentials.
 | Double-click composer | Expand the composer |
 | Escape | Collapse the composer, keeping the draft |
 | Page Up / Page Down or mouse wheel | Scroll messages |
-| Ctrl+R | Refresh the current conversation |
+| Ctrl+R | Refresh the current conversation and unread status |
 | Ctrl+C | Quit |
 | F2 | Open / close settings |
 
@@ -139,6 +139,23 @@ Settings are stored as a small JSON file at
 `$XDG_CONFIG_HOME/slack-tui/settings.json` when that variable is set.
 They apply across workspaces and persist between runs.
 
+## Unread status
+
+Unread conversations appear in **bold**. Status is checked in the background at
+startup and with **Ctrl+R**, prioritizing the visible sidebar. Slack requires
+per-conversation lookups, so a large workspace can take several minutes to check.
+If Slack rate-limits the check, the status line reports it; use Ctrl+R to retry.
+
+Opening or refreshing a conversation marks it read in Slack through the newest
+loaded message. If that update fails, messages remain visible and the status line
+explains the failure; Ctrl+R retries.
+
+Read updates require `channels:write`, `groups:write`, `im:write`, and `mpim:write`
+under **OAuth & Permissions → User Token Scopes**. The app manifest includes these.
+For an existing installation, add the scopes and reinstall/reauthorize the app,
+then update your saved credentials if Slack issues a new token. Until authorized,
+unread styling clears locally for this session only.
+
 ## Current limitations
 
 - **Refresh is manual:** press Ctrl+R to fetch incoming messages.
@@ -148,7 +165,7 @@ They apply across workspaces and persist between runs.
 - **Approximate active-only sidebar:** hides conversations Slack marks dormant
   and explicitly closed DMs. Ctrl+L reveals all loaded conversations. Activity
   metadata is loaded at startup; custom sections and muted preferences aren't synced.
-- No thread navigation, adding/removing reactions, search, read-state updates or persistent
+- No thread navigation, adding/removing reactions, search or persistent
   message cache yet.
 
 If a send reports an uncertain delivery, check Slack before retrying to avoid

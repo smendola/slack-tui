@@ -1,8 +1,89 @@
 import { afterEach, expect, test } from "bun:test";
-import { Slack, displayText, messageText, channelName, compactName, isSidebarActive } from "./slack";
+import { Slack, displayText, messageText, channelName, compactName, isSidebarActive, laterTimestamp } from "./slack";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
+
+test("read updates POST the exact cursor, serialize requests, and never rewind", async () => {
+  const timestamps: string[] = [];
+  let inFlight = 0;
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    expect(new URL(String(input)).pathname).toBe("/api/conversations.mark");
+    expect(init?.method).toBe("POST");
+    expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer test");
+    const body = JSON.parse(String(init?.body));
+    expect(body.channel).toBe("C1");
+    expect(++inFlight).toBe(1);
+    timestamps.push(body.ts);
+    await Promise.resolve();
+    inFlight--;
+    return Response.json({ ok: true });
+  }) as unknown as typeof fetch;
+  const slack = new Slack("test");
+  await Promise.all([
+    slack.markRead("C1", "1770000000.000002"),
+    slack.markRead("C1", "1770000000.000003"),
+    slack.markRead("C1", "1770000000.000001"),
+  ]);
+  expect(timestamps).toEqual(["1770000000.000002", "1770000000.000003"]);
+});
+
+test("failed read updates surface missing scopes and can be retried", async () => {
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    return Response.json(++calls === 1
+      ? { ok: false, error: "missing_scope", needed: "channels:write" }
+      : { ok: true });
+  }) as unknown as typeof fetch;
+  const slack = new Slack("test");
+  await expect(slack.markRead("C1", "1.000001")).rejects.toThrow("missing_scope");
+  await slack.markRead("C1", "1.000001");
+  expect(calls).toBe(2);
+});
+
+test("DM display unread count takes precedence over raw count without fetching history", async () => {
+  globalThis.fetch = (async (input: unknown) => {
+    expect(new URL(String(input)).pathname).toEndWith("/conversations.info");
+    return Response.json({ ok: true, channel: { unread_count_display: 0, unread_count: 3 } });
+  }) as unknown as typeof fetch;
+  expect(await new Slack("test").unread("D1")).toBe(false);
+});
+
+test("channel unread check uses the later server/local cursor and excludes its message", async () => {
+  let local = "1770000000.000002";
+  globalThis.fetch = (async (input: unknown) => {
+    const url = new URL(String(input));
+    expect(url.searchParams.get("channel")).toBe("C1");
+    if (url.pathname.endsWith("/conversations.info")) {
+      return Response.json({ ok: true, channel: { last_read: "1770000000.000001" } });
+    }
+    expect(url.searchParams.get("oldest")).toBe(local);
+    expect(url.searchParams.get("inclusive")).toBe("false");
+    expect(url.searchParams.get("limit")).toBe("1");
+    return Response.json({ ok: true, messages: local.endsWith("2") ? [{ ts: "1770000000.000003" }] : [] });
+  }) as unknown as typeof fetch;
+  const slack = new Slack("test");
+  expect(await slack.unread("C1", local)).toBe(true);
+  local = "1770000000.000003";
+  expect(await slack.unread("C1", local)).toBe(false);
+});
+
+test("missing read metadata stays unknown instead of treating all history as unread", async () => {
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    return Response.json({ ok: true, channel: {} });
+  }) as unknown as typeof fetch;
+  expect(await new Slack("test").unread("C1")).toBeUndefined();
+  expect(calls).toBe(1);
+});
+
+test("read cursors preserve microseconds and compare timestamps numerically", () => {
+  expect(laterTimestamp("999.999999", "1000.000001")).toBe("1000.000001");
+  expect(laterTimestamp("1770000000.000002", "1770000000.000001")).toBe("1770000000.000002");
+  expect(laterTimestamp("0000000000.000000", "1")).toBe("1");
+  expect(laterTimestamp(undefined, "1")).toBe("1");
+});
 
 test("external DM participants missing from the directory get a profile lookup", async () => {
   globalThis.fetch = (async (input: unknown) => {

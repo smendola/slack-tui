@@ -3,7 +3,7 @@ import {
   SelectRenderableEvents, TextareaRenderable, createCliRenderer,
   StyledText, bg, fg, BorderChars, ImageRenderable, createHostClipboard, type HostClipboardService,
 } from "@opentui/core";
-import { Slack, Demo, channelName, displayText, messageText, isSidebarActive, type Channel, type Message } from "./slack";
+import { Slack, Demo, channelName, displayText, messageText, isSidebarActive, laterTimestamp, type Channel, type Message } from "./slack";
 import { ChannelSelect } from "./channel-select";
 import { tokenProvider } from "./oauth";
 import { credentialsPath } from "./config-paths";
@@ -225,6 +225,41 @@ let selected: Channel | undefined;
 let allChannels: Channel[] = [];
 let showDMs = false;
 let showAll = false;
+const locallyRead = new Map<string, string>();
+let checkingUnread = false;
+async function refreshUnread() {
+  if (checkingUnread || closed) return;
+  checkingUnread = true;
+  // Prioritize the current sidebar; spread requests across time to respect Slack's
+  // per-method rate limits. This is a single sweep, not continuous polling.
+  const visible = new Set(menu.options.map(option => option.value.id));
+  const channels = [...allChannels].sort((a, b) => Number(visible.has(b.id)) - Number(visible.has(a.id)));
+  try {
+    for (const channel of channels) {
+      if (closed) break;
+      const cursor = locallyRead.get(channel.id);
+      const unread = await chat.unread(channel.id, cursor);
+      if (closed) break;
+      // A history load completed while this request was in flight.
+      if (cursor === locallyRead.get(channel.id)) {
+        channel.unread = unread;
+        menu.requestRender();
+      }
+      if (!demo) await new Promise(resolve => setTimeout(resolve, 1300));
+    }
+  } catch (error) {
+    report(`Unread check paused: ${String(error)} · Ctrl+R to retry`);
+  } finally {
+    checkingUnread = false;
+  }
+}
+function readLocally(channel: Channel, messages: Message[]) {
+  let cursor = locallyRead.get(channel.id);
+  for (const message of messages) cursor = laterTimestamp(cursor, message.ts);
+  if (cursor) locallyRead.set(channel.id, cursor);
+  channel.unread = false;
+  menu.requestRender();
+}
 function updateSidebar() {
   const channels = allChannels.filter(channel => !!channel.is_im === showDMs
     && (showAll || channel.id === selected?.id || isSidebarActive(channel)));
@@ -400,9 +435,23 @@ async function load(channel: Channel) {
     const result = await chat.history(channel.id);
     if (closed || request !== generation) return;
     currentMessages = result;
+    readLocally(channel, result);
     renderMessages();
     scroll.scrollTo(Infinity);
     report(`${result.length} recent messages · Refresh with Ctrl+R`);
+    const latest = result.reduce<string | undefined>((cursor, message) => laterTimestamp(cursor, message.ts), undefined);
+    if (latest) {
+      try {
+        await chat.markRead(channel.id, latest);
+      } catch (error) {
+        if (closed || request !== generation) return;
+        const scope = channel.is_im ? "im:write" : channel.is_mpim ? "mpim:write"
+          : channel.is_private ? "groups:write" : "channels:write";
+        report(String(error).includes("missing_scope")
+          ? `Read locally only: add ${scope} to User Token Scopes and reauthorize your Slack app. Ctrl+R to retry.`
+          : `Messages loaded, but Slack read update failed: ${String(error)} · Ctrl+R to retry`);
+      }
+    }
   } catch (error) {
     if (closed || request !== generation) return;
     showMessageStatus("Unable to load history. Ctrl+R to retry.");
@@ -426,6 +475,7 @@ async function sendMessage() {
     if (closed) return;
     if (request === generation) {
       currentMessages.push(message);
+      readLocally(channel, currentMessages);
       renderMessages();
       scroll.scrollTo(Infinity);
     }
@@ -484,6 +534,7 @@ renderer.keyInput.on("keypress", key => {
   } else if (key.ctrl && key.name === "r") {
     key.preventDefault();
     if (selected) void load(selected);
+    void refreshUnread();
   } else if (!composerExpanded && (key.name === "pageup" || key.name === "pagedown")) {
     key.preventDefault();
     scroll.scrollBy(key.name === "pageup" ? -10 : 10);
@@ -499,6 +550,7 @@ try {
     allChannels = channels;
     showDMs = channels.length > 0 && channels.every(channel => channel.is_im);
     updateSidebar();
+    void refreshUnread();
     const first = menu.getSelectedOption()?.value as Channel | undefined;
     if (first) await load(first);
     else if (channels.length) report("No active conversations here · Ctrl+L: show all · Ctrl+D: DMs/channels");
