@@ -436,13 +436,39 @@ async function pasteClipboard() {
   } catch (error) { if (request === pasteGeneration) report(String(error)); }
   finally { readingClipboard = false; }
 }
+const shortMonth = new Intl.DateTimeFormat("en-US", { month: "short" });
+function dateDivider(date: Date, currentYear: number) {
+  const day = date.getDate();
+  const suffix = day >= 11 && day <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[day % 10] ?? "th");
+  const year = date.getFullYear() === currentYear ? "" : `, ${date.getFullYear()}`;
+  const row = new BoxRenderable(renderer, { width: "100%", height: 1, flexShrink: 0, flexDirection: "row", marginBottom: 1 });
+  const ruleColor = "#808080";
+  const rule = () => new BoxRenderable(renderer, {
+    flexBasis: 0, flexGrow: 1, height: 1, border: ["top"], borderColor: ruleColor,
+  });
+  row.add(rule());
+  row.add(new TextRenderable(renderer, {
+    content: ` ${shortMonth.format(date)} ${day}${suffix}${year} `,
+    fg: "#b8b8b8", bg: "#444444", height: 1, selectable: false,
+  }));
+  row.add(rule());
+  return row;
+}
 function renderMessages() {
   clearMessages();
   const version = messageRenderVersion;
   if (!currentMessages.length) { showMessageStatus("No messages yet."); return; }
+  let previousDay: string | undefined;
+  const currentYear = new Date().getFullYear();
   for (const message of currentMessages) {
+    const timestamp = new Date(Number(message.ts) * 1000);
+    const day = timestamp.toDateString();
+    if (day !== previousDay && Number.isFinite(timestamp.getTime())) {
+      messages.add(dateDivider(timestamp, currentYear));
+      previousDay = day;
+    }
     const name = displayText(message.username || chat.users.get(message.user ?? "") || message.bot_profile?.name || message.user || message.bot_id || "Slack", chat.users);
-    const time = new Date(Number(message.ts) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const time = timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const images = messageImages(message);
     const imageLabels = new Set(images.map(image => image.label));
     const files = message.files?.filter(file => !imageLabels.has(file.name || file.title || "Image"))

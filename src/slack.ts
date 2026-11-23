@@ -292,7 +292,7 @@ export class Demo implements Chat {
   avatars = new Map<string, string>();
   private messages = new Map<string, Message[]>([
     ["general", [
-      { ts: "1770000000", user: "alice", text: "Welcome to slack-tui! Channels on the left, messages on the right." },
+      { ts: "1769913600", user: "alice", text: "Welcome to slack-tui! Channels on the left, messages on the right." },
       { ts: "1770000060", user: "alice", text: "Tab switches panes. Enter opens a channel or sends a message.\nCtrl+R refreshes. Page Up/Down scrolls." },
       { ts: "1770000120", user: "you", text: "This is an offline demo. Messages stay in memory; nothing goes to Slack." },
     ]],
