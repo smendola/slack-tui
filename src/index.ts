@@ -18,6 +18,7 @@ import { renderEmoji } from "./emoji";
 import { createHelpScreen } from "./help";
 import { messageSelectionText } from "./message-selection";
 import { restoreDraft } from "./drafts";
+import { lastConversation } from "./last-conversation";
 import { messageContent } from "./message-content";
 
 const demo = process.argv.includes("--demo");
@@ -278,6 +279,7 @@ function updateFooter() {
 for (const pane of [menu, composer, settingsScreen, help.screen]) pane.on("focused", updateFooter);
 
 let selected: Channel | undefined;
+let lastOpened: ReturnType<typeof lastConversation> | undefined;
 let allChannels: Channel[] = [];
 let showDMs = false;
 let showAll = false;
@@ -353,16 +355,16 @@ function switchSidebar(dms: boolean) {
   }
   menu.focus();
 }
-function updateSidebar() {
+function updateSidebar(preferredId = selected?.id) {
   const channels = allChannels.filter(channel => !!channel.is_im === showDMs
-    && (showAll || channel.id === selected?.id || isSidebarActive(channel)));
+    && (showAll || channel.id === preferredId || isSidebarActive(channel)));
   sidebar.title = `${showAll ? "All" : "Active"} (${channels.length})`;
   for (const { tab, isDM } of sidebarTabs) {
     tab.bg = isDM === showDMs ? "#403d52" : "#191724";
     tab.fg = isDM === showDMs ? "#f6c177" : "#e0def4";
   }
   menu.options = channels.map(channel => ({ name: channelName(channel, chat.users), description: "", value: channel }));
-  const index = channels.findIndex(channel => channel.id === selected?.id);
+  const index = channels.findIndex(channel => channel.id === preferredId);
   menu.setSelectedIndex(Math.max(0, index));
 }
 let currentMessages: Message[] = [];
@@ -587,6 +589,8 @@ async function load(channel: Channel) {
     renderMessages();
     scroll.scrollTo(Infinity);
     report(`${result.length} recent messages · Refresh with Ctrl+R`);
+    try { lastOpened?.save(channel.id); }
+    catch (error) { report(`Could not remember conversation: ${String(error)}`); }
     const latest = result.reduce<string | undefined>((cursor, message) => laterTimestamp(cursor, message.ts), undefined);
     if (latest) {
       try {
@@ -710,8 +714,13 @@ try {
     title.content = ` slack-tui · ${identity.team} · ${identity.user}${demo ? " · DEMO" : ""}`;
     channels.sort((a, b) => Number(!!a.is_im) - Number(!!b.is_im) || channelName(a, chat.users).localeCompare(channelName(b, chat.users)));
     allChannels = channels;
-    showDMs = channels.length > 0 && channels.every(channel => channel.is_im);
-    updateSidebar();
+    lastOpened = lastConversation(identity.team_id, identity.user_id);
+    let previousId: string | undefined;
+    try { previousId = lastOpened.read(); }
+    catch (error) { report(`Could not restore conversation: ${String(error)}`); }
+    const previous = channels.find(channel => channel.id === previousId);
+    showDMs = previous ? !!previous.is_im : channels.length > 0 && channels.every(channel => channel.is_im);
+    updateSidebar(previous?.id);
     void refreshUnread();
     void refreshPresence();
     const first = menu.getSelectedOption()?.value as Channel | undefined;

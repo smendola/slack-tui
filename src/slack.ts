@@ -39,7 +39,7 @@ type User = { id: string; name: string; profile?: { display_name?: string; real_
 export interface Chat {
   users: Map<string, string>;
   avatars: Map<string, string>;
-  connect(): Promise<{ team: string; user: string }>;
+  connect(): Promise<{ team: string; user: string; team_id: string; user_id: string }>;
   channels(): Promise<Channel[]>;
   history(channel: string): Promise<Message[]>;
   unread(channel: string, locallyRead?: string): Promise<boolean | undefined>;
@@ -103,7 +103,7 @@ export class Slack implements Chat {
   }
 
   async connect() {
-    const auth = await this.call<{ team: string; user: string; user_id: string }>("auth.test");
+    const auth = await this.call<{ team: string; user: string; team_id: string; user_id: string }>("auth.test");
     this.userId = auth.user_id;
     const users = await this.pages<User>("users.list", "members");
     for (const user of users) {
@@ -309,7 +309,7 @@ export class Demo implements Chat {
     ]],
     ["dm", [{ ts: "1770000400", user: "alice", text: "Hello <@you> — DMs work here too." }]],
   ]);
-  async connect() { return { team: "Offline demo", user: "You" }; }
+  async connect() { return { team: "Offline demo", user: "You", team_id: "demo", user_id: "you" }; }
   async channels() { return [{ id: "general", name: "general" }, { id: "dev", name: "dev" }, { id: "dm", is_im: true, user: "alice" }]; }
   async history(channel: string) { return [...(this.messages.get(channel) ?? [])]; }
   async markRead(_channel: string, _ts: string) {}
