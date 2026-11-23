@@ -1,3 +1,4 @@
+// Agent sessions: OC:x13-cachy:sal:ses_df58f4884ffeQ73n6oD4HRDj22 Edited
 import {
   BoxRenderable, TextRenderable, ScrollBoxRenderable,
   SelectRenderableEvents, TextareaRenderable, createCliRenderer,
@@ -58,8 +59,23 @@ const body = new BoxRenderable(renderer, {
 root.add(body);
 const sidebar = new BoxRenderable(renderer, { width: 28, flexShrink: 0, border: true, title: "Conversations", borderColor: "#524f67" });
 body.add(sidebar);
+const tabRow = new BoxRenderable(renderer, { flexDirection: "row", height: 1, flexShrink: 0 });
+sidebar.add(tabRow);
+const sidebarTabs = ["Channels", "DMs"].map(label => {
+  const isDM = label === "DMs";
+  const tab = new TextRenderable(renderer, {
+    content: ` ${label} `, height: 1, selectable: false,
+    onMouseDown(event) {
+      if (event.button !== 0) return;
+      switchSidebar(isDM);
+      event.stopPropagation();
+    },
+  });
+  tabRow.add(tab);
+  return { tab, isDM };
+});
 const menu = new ChannelSelect(renderer, {
-  width: "100%", height: "100%", options: [], showDescription: false,
+  width: "100%", flexGrow: 1, minHeight: 0, options: [], showDescription: false,
   backgroundColor: "#191724", textColor: "#e0def4", selectedBackgroundColor: "#403d52",
   selectedTextColor: "#f6c177",
 });
@@ -318,10 +334,22 @@ function readLocally(channel: Channel, messages: Message[]) {
   channel.unread = false;
   menu.requestRender();
 }
+function switchSidebar(dms: boolean) {
+  if (showDMs !== dms) {
+    showDMs = dms;
+    updateSidebar();
+    if (showDMs) void refreshPresence();
+  }
+  menu.focus();
+}
 function updateSidebar() {
   const channels = allChannels.filter(channel => !!channel.is_im === showDMs
     && (showAll || channel.id === selected?.id || isSidebarActive(channel)));
-  sidebar.title = `${showDMs ? "DMs" : "Channels"} · ${showAll ? "All" : "Active"} (${channels.length})`;
+  sidebar.title = `${showAll ? "All" : "Active"} (${channels.length})`;
+  for (const { tab, isDM } of sidebarTabs) {
+    tab.bg = isDM === showDMs ? "#403d52" : "#191724";
+    tab.fg = isDM === showDMs ? "#f6c177" : "#e0def4";
+  }
   menu.options = channels.map(channel => ({ name: channelName(channel, chat.users), description: "", value: channel }));
   const index = channels.findIndex(channel => channel.id === selected?.id);
   menu.setSelectedIndex(Math.max(0, index));
@@ -621,10 +649,7 @@ renderer.keyInput.on("keypress", key => {
     if (composer.focused) menu.focus(); else composer.focus();
   } else if (key.ctrl && key.name === "d") {
     key.preventDefault();
-    showDMs = !showDMs;
-    updateSidebar();
-    if (showDMs) void refreshPresence();
-    menu.focus();
+    switchSidebar(!showDMs);
   } else if (key.ctrl && key.name === "l") {
     key.preventDefault();
     showAll = !showAll;

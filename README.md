@@ -83,7 +83,7 @@ are preserved. The demo does not load or migrate credentials.
 | --- | --- |
 | Up / Down, then Enter | Choose and open a conversation |
 | Click a conversation | Open it |
-| Ctrl+D | Switch between channels/group DMs and 1:1 DMs |
+| Click **Channels** or **DMs**, or press Ctrl+D | Switch between channels/group DMs and 1:1 DMs |
 | Ctrl+L | Toggle active-only / all conversations |
 | Mouse wheel over sidebar | Move through conversations |
 | Drag either adjoining vertical pane border | Resize sidebar and chat |

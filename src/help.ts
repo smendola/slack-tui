@@ -16,7 +16,7 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
       "F2 — Open / close settings.",
       "Tab — Switch focus between the sidebar and composer.",
       "Up / Down, then Enter — Choose and open a conversation in the sidebar.",
-      "Ctrl+D — Switch between channels / group DMs and one-to-one DMs.",
+      "Click Channels or DMs, or press Ctrl+D, to switch lists. Group DMs are under Channels.",
       "Ctrl+L — Toggle active-only / all conversations.",
       "Ctrl+R — Refresh current messages, unread status and DM presence.",
       "Page Up / Page Down — Scroll messages.",
