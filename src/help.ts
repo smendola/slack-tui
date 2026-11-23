@@ -37,6 +37,7 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
       "Mouse wheel over the sidebar moves through conversations; over messages it scrolls chat.",
       "Drag over message text to select it; releasing the mouse automatically copies it to the clipboard.",
       "Double-click message text to select a word; triple-click selects a logical line. Selection stays highlighted.",
+      "Underlined links show their label instead of the full URL. Use your terminal's link gesture (often Ctrl+click) to open them.",
       "Double-click the composer to expand it.",
       "Click Remove image to discard an attachment.",
       "In settings, click Show profile photos (or press Space / Enter) to toggle it.",

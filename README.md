@@ -116,6 +116,10 @@ clipboard when available, with terminal OSC 52 as a fallback. Over SSH it
 targets the terminal clipboard, which must allow OSC 52 clipboard writes.
 Selections in the composer, settings or help do not trigger automatic copying.
 
+Labeled message and bot-attachment links display as underlined, clickable labels
+instead of appending the full URL. Use your terminal's link gesture (often
+Ctrl+click) to open them; this requires OSC 8 hyperlink support.
+
 ## Images and avatars
 
 Focus the composer and press **Ctrl+V** to attach a clipboard image. Add an

@@ -261,21 +261,30 @@ export function displayText(text: string, users: Map<string, string>) {
     .replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
 }
 
-export function messageText(message: Message, users: Map<string, string>) {
+function attachmentLink(label: string, url: string) {
+  if (!/^https?:\/\//.test(url)) return `${label} (${url})`;
+  return `<${url.replace(/</g, "%3C").replace(/>/g, "%3E").replace(/\|/g, "%7C")}|${label.replace(/</g, "&lt;").replace(/>/g, "&gt;")}>`;
+}
+
+export function messageSource(message: Message) {
   const attachments = (message.attachments ?? []).map(attachment => {
     const title = attachment.title_link
-      ? `${attachment.title || "Open"} (${attachment.title_link})` : attachment.title;
+      ? attachmentLink(attachment.title || "Open", attachment.title_link) : attachment.title;
     const content = [
       attachment.pretext, attachment.author_name, title, attachment.text,
       ...(attachment.fields ?? []).map(field => [field.title, field.value].filter(Boolean).join(": ")),
     ].filter(part => part?.trim()).join("\n");
     const links = (attachment.actions ?? [])
       .filter(action => action.url)
-      .map(action => `${action.text || "Open"} (${action.url})`);
+      .map(action => attachmentLink(action.text || "Open", action.url!));
     return [content || attachment.fallback, ...links, attachment.footer]
       .filter(part => part?.trim()).join("\n");
   });
-  return renderEmoji(displayText([message.text, ...attachments].filter(part => part?.trim()).join("\n\n"), users));
+  return [message.text, ...attachments].filter(part => part?.trim()).join("\n\n");
+}
+
+export function messageText(message: Message, users: Map<string, string>) {
+  return renderEmoji(displayText(messageSource(message), users));
 }
 
 export class Demo implements Chat {

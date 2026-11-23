@@ -4,7 +4,7 @@ import {
   StyledText, bg, fg, BorderChars, ImageRenderable, createHostClipboard, type HostClipboardService,
   createClipboard, createRendererClipboardAdapter, type ClipboardService, type Selection,
 } from "@opentui/core";
-import { Slack, Demo, channelName, displayText, messageText, isSidebarActive, laterTimestamp, type Channel, type Message } from "./slack";
+import { Slack, Demo, channelName, displayText, isSidebarActive, laterTimestamp, type Channel, type Message } from "./slack";
 import { ChannelSelect } from "./channel-select";
 import { tokenProvider } from "./oauth";
 import { credentialsPath } from "./config-paths";
@@ -17,6 +17,7 @@ import { renderEmoji } from "./emoji";
 import { createHelpScreen } from "./help";
 import { messageSelectionText } from "./message-selection";
 import { restoreDraft } from "./drafts";
+import { messageContent } from "./message-content";
 
 const demo = process.argv.includes("--demo");
 let settingsLoadError = "";
@@ -435,7 +436,7 @@ function renderMessages() {
     }));
     textColumn.add(new TextRenderable(renderer, {
       width: "100%", flexShrink: 0, fg: "#e0def4", wrapMode: "word",
-      content: `${messageText(message, chat.users)}${files ? `\n${files}` : ""}${message.reply_count ? `\n↳ ${message.reply_count} replies (not loaded)` : ""}`,
+      content: messageContent(message, chat.users, `${files ? `\n${files}` : ""}${message.reply_count ? `\n↳ ${message.reply_count} replies (not loaded)` : ""}`),
     }));
     for (const source of images) {
       const label = new TextRenderable(renderer, {
