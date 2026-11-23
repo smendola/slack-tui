@@ -172,6 +172,7 @@ function setComposerExpanded(expanded: boolean) {
   composer.height = expanded ? "auto" : 1;
   composer.flexGrow = expanded ? 1 : 0;
   if (expanded) composer.focus();
+  updateFooter();
 }
 const status = new TextRenderable(renderer, { content: "Connecting…", height: 1, fg: "#908caa" });
 let settingsOpen = false;
@@ -261,10 +262,20 @@ function closeHelp() {
   else menu.focus();
 }
 root.add(status);
-root.add(new TextRenderable(renderer, {
-  content: " F1: help · Ctrl+D: DMs · Ctrl+V: paste image/text · Shift+Enter: newline · Enter: send · Ctrl+R: refresh",
-  height: 1, fg: "#908caa",
-}));
+const footer = new TextRenderable(renderer, { height: 1, fg: "#908caa" });
+root.add(footer);
+function updateFooter() {
+  // Help has its own navigation hints beneath the scroll area.
+  footer.visible = !helpOpen;
+  if (helpOpen) return;
+  if (settingsOpen) footer.content = " Space/Enter: toggle · Esc: back · F1: help";
+  else if (composer.focused) {
+    footer.content = ` Enter: send · Shift+Enter: newline · ${composerExpanded ? "Esc: collapse" : "Ctrl+V: paste"} · Tab: sidebar · F1: help`;
+  } else {
+    footer.content = " ↑↓: choose · Enter: open · Ctrl+D: channels/DMs · Ctrl+L: active/all · Tab: write · F1: help";
+  }
+}
+for (const pane of [menu, composer, settingsScreen, help.screen]) pane.on("focused", updateFooter);
 
 let selected: Channel | undefined;
 let allChannels: Channel[] = [];
