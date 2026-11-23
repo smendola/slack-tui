@@ -95,13 +95,26 @@ are preserved. The demo does not load or migrate credentials.
 | Double-click composer | Expand the composer |
 | Escape | Collapse the composer, keeping the draft |
 | Page Up / Page Down or mouse wheel | Scroll messages |
+| Drag over message text, then release | Select and automatically copy to clipboard |
+| Double / triple-click message text | Select and copy a word / logical line |
 | Ctrl+R | Refresh the current conversation, unread status and DM presence |
 | Ctrl+C | Quit |
+| F1 | Open / close help (Escape also closes it) |
 | F2 | Open / close settings |
 
 Shift+Enter requires a terminal that reports modified Enter keys. Double-click
 can also expand the composer. Sending collapses it unless you've edited the
 draft while the send was in progress.
+
+Press **F1** for the full in-app guide: keybindings, mouse controls, status
+indicators, resolved credential/settings paths, and image/clipboard behavior.
+Scroll with Up/Down, Page Up/Down, Home/End or the mouse wheel. Closing help
+restores the previous screen and focus without changing your draft.
+
+Message selections stay highlighted after copying. Copying uses the local
+clipboard when available, with terminal OSC 52 as a fallback. Over SSH it
+targets the terminal clipboard, which must allow OSC 52 clipboard writes.
+Selections in the composer, settings or help do not trigger automatic copying.
 
 ## Images and avatars
 

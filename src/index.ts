@@ -2,6 +2,7 @@ import {
   BoxRenderable, TextRenderable, ScrollBoxRenderable,
   SelectRenderableEvents, TextareaRenderable, createCliRenderer,
   StyledText, bg, fg, BorderChars, ImageRenderable, createHostClipboard, type HostClipboardService,
+  createClipboard, createRendererClipboardAdapter, type ClipboardService, type Selection,
 } from "@opentui/core";
 import { Slack, Demo, channelName, displayText, messageText, isSidebarActive, laterTimestamp, type Channel, type Message } from "./slack";
 import { ChannelSelect } from "./channel-select";
@@ -13,6 +14,9 @@ import { AvatarCache } from "./avatars";
 import { defaultSettings, loadSettings, saveSettings, settingsPath, type Settings } from "./settings";
 import { messageImages, MessageImageCache } from "./message-images";
 import { renderEmoji } from "./emoji";
+import { createHelpScreen } from "./help";
+import { messageSelectionText } from "./message-selection";
+import { restoreDraft } from "./drafts";
 
 const demo = process.argv.includes("--demo");
 let settingsLoadError = "";
@@ -156,6 +160,8 @@ const status = new TextRenderable(renderer, { content: "Connecting…", height: 
 let settingsOpen = false;
 let settingsSaving = false;
 let returnToComposer = false;
+let helpOpen = false;
+let helpReturnToComposer = false;
 const settingsScreen = new BoxRenderable(renderer, {
   flexGrow: 1, minHeight: 0, flexDirection: "column", padding: 1,
   border: true, title: "Settings", borderColor: "#524f67", visible: false, focusable: true,
@@ -215,9 +221,31 @@ async function toggleProfilePhotos() {
     if (!closed) updateSettingsScreen();
   }
 }
+const help = createHelpScreen(renderer, closeHelp);
+root.add(help.screen);
+function openHelp() {
+  if (helpOpen) return;
+  helpReturnToComposer = composer.focused;
+  helpOpen = true;
+  body.visible = false;
+  settingsScreen.visible = false;
+  help.screen.visible = true;
+  help.scroll.scrollTo(0);
+  help.screen.focus();
+}
+function closeHelp() {
+  if (!helpOpen) return;
+  helpOpen = false;
+  help.screen.visible = false;
+  settingsScreen.visible = settingsOpen;
+  body.visible = !settingsOpen;
+  if (settingsOpen) settingsScreen.focus();
+  else if (helpReturnToComposer) composer.focus();
+  else menu.focus();
+}
 root.add(status);
 root.add(new TextRenderable(renderer, {
-  content: " F2: settings · Ctrl+V: paste image/text · Ctrl+G: remove image · Shift+Enter: newline · Enter: send · Ctrl+D: DMs · Ctrl+R: refresh",
+  content: " F1: help · F2: settings · Ctrl+V: paste image/text · Shift+Enter: newline · Enter: send · Ctrl+D: DMs · Ctrl+R: refresh",
   height: 1, fg: "#908caa",
 }));
 
@@ -304,14 +332,40 @@ let closed = false;
 const drafts = new Map<string, string>();
 const imageDrafts = new Map<string, ImageAttachment>();
 let clipboard: HostClipboardService | undefined;
+let copyClipboard: ClipboardService | undefined;
+let copyQueue = Promise.resolve();
+let copyGeneration = 0;
 let readingClipboard = false;
 let pasteGeneration = 0;
 renderer.once("destroy", () => {
   closed = true;
   imageDrafts.clear();
-  void clipboard?.dispose().catch(() => {});
+  void (copyClipboard ?? clipboard)?.dispose().catch(() => {});
 });
 function report(text: string) { if (!closed) status.content = displayText(text, chat.users); }
+function hostClipboard() {
+  return clipboard ??= createHostClipboard({ maxReadBytes: MAX_IMAGE_BYTES, timeoutMs: 5_000, maxImagePixels: 40_000_000 });
+}
+renderer.on("selection", (selection: Selection | null) => {
+  if (closed || helpOpen || settingsOpen || composerExpanded) return;
+  const text = messageSelectionText(selection, messages);
+  if (!text) return;
+  const request = ++copyGeneration;
+  // Serialize writes so an older clipboard operation cannot overwrite a newer selection.
+  copyQueue = copyQueue.then(async () => {
+    if (closed || request !== copyGeneration) return;
+    copyClipboard ??= createClipboard({
+      host: hostClipboard(), terminal: createRendererClipboardAdapter(renderer),
+    });
+    const result = await copyClipboard.writeText(text, { destination: "best-available" });
+    if (closed || request !== copyGeneration) return;
+    if (result.host.status === "written") report("Selection copied to clipboard");
+    else if (result.terminal.status === "attempted") report("Selection sent to terminal clipboard");
+    else report("Could not copy selection: clipboard unavailable or blocked by terminal settings");
+  }).catch(error => {
+    if (!closed && request === copyGeneration) report(`Could not copy selection: ${String(error)}`);
+  });
+});
 function updateAttachment() {
   const image = selected ? imageDrafts.get(selected.id) : undefined;
   attachmentBox.visible = !!image;
@@ -332,8 +386,7 @@ async function pasteClipboard() {
   readingClipboard = true;
   report("Reading clipboard…");
   try {
-    clipboard ??= createHostClipboard({ maxReadBytes: MAX_IMAGE_BYTES, timeoutMs: 5_000, maxImagePixels: 40_000_000 });
-    const result = await clipboard.read({ preferredTypes: ["image/png", "image/jpeg", "image/webp", "image/gif", "text/plain"] });
+    const result = await hostClipboard().read({ preferredTypes: ["image/png", "image/jpeg", "image/webp", "image/gif", "text/plain"] });
     if (closed || request !== pasteGeneration || selected?.id !== channel) return;
     if (result.status !== "read") {
       report(`Clipboard ${result.status}. Ctrl+V reads this machine's clipboard; terminal paste still works for text.`);
@@ -371,7 +424,7 @@ function renderMessages() {
     if (settings.showProfilePhotos) {
       avatarColumn = new BoxRenderable(renderer, { width: 4, height: 2, flexShrink: 0 });
       const initials = name.trim().split(/\s+/).slice(0, 2).map(part => Array.from(part)[0] ?? "").join("").toUpperCase();
-      fallback = new TextRenderable(renderer, { content: initials, width: 4, height: 2, fg: "#b8b8b8", bg: "#403d52" });
+      fallback = new TextRenderable(renderer, { content: initials, width: 4, height: 2, fg: "#b8b8b8", bg: "#403d52", selectable: false });
       avatarColumn.add(fallback);
       row.add(avatarColumn);
     }
@@ -451,7 +504,7 @@ async function load(channel: Channel) {
   pasteGeneration++;
   const changedChannel = selected?.id !== channel.id;
   selected = channel;
-  composer.setText(drafts.get(channel.id) ?? "");
+  if (changedChannel) restoreDraft(composer, drafts.get(channel.id) ?? "");
   updateAttachment();
   if (changedChannel) setComposerExpanded(composer.plainText.includes("\n"));
   heading.content = channelName(channel, chat.users);
@@ -509,7 +562,7 @@ async function sendMessage() {
       scroll.scrollTo(Infinity);
     }
     if (composer.plainText === original) {
-      composer.setText("");
+      restoreDraft(composer, "");
       setComposerExpanded(false);
     }
     drafts.set(channel.id, composer.plainText);
@@ -523,9 +576,24 @@ async function sendMessage() {
   } finally { sending = false; }
 }
 renderer.keyInput.on("keypress", key => {
+  if (key.name === "f1") {
+    key.preventDefault();
+    if (helpOpen) closeHelp(); else openHelp();
+    return;
+  }
   if (key.name === "f2") {
     key.preventDefault();
+    if (helpOpen) closeHelp();
     if (settingsOpen) closeSettings(); else openSettings();
+    return;
+  }
+  if (helpOpen) {
+    key.preventDefault();
+    if (key.name === "escape") closeHelp();
+    else if (key.name === "up" || key.name === "down") help.scroll.scrollBy(key.name === "up" ? -1 : 1);
+    else if (key.name === "pageup" || key.name === "pagedown") help.scroll.scrollBy(key.name === "pageup" ? -1 : 1, "viewport");
+    else if (key.name === "home") help.scroll.scrollTo(0);
+    else if (key.name === "end") help.scroll.scrollTo(Infinity);
     return;
   }
   if (settingsOpen) {
