@@ -16,7 +16,7 @@ import { defaultSettings, loadSettings, saveSettings, settingsPath, type Setting
 import { messageImages, MessageImageCache } from "./message-images";
 import { renderEmoji } from "./emoji";
 import { createHelpScreen } from "./help";
-import { button } from "./button";
+import { button, buttonBackground } from "./button";
 import { messageSelectionText } from "./message-selection";
 import { restoreDraft } from "./drafts";
 import { lastConversation } from "./last-conversation";
@@ -209,7 +209,10 @@ function toggleReactionPalette(message: Message, column: BoxRenderable, notice: 
   const wasOpen = reactionPalette?.parent === column;
   closeReactionPalette();
   if (wasOpen) return;
-  const palette = new BoxRenderable(renderer, { flexDirection: "row", flexWrap: "wrap", flexShrink: 0 });
+  const palette = new BoxRenderable(renderer, {
+    flexDirection: "row", flexWrap: "wrap", flexShrink: 0, alignSelf: "flex-start", maxWidth: "100%",
+    border: true, borderStyle: "single", borderColor: "#686868", backgroundColor: buttonBackground,
+  });
   reactionPalette = palette;
   column.add(palette);
   for (const name of paletteNames) {
