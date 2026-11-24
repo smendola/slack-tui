@@ -2,6 +2,8 @@
 
 Keep this list updated as ideas come up and work is completed. Check off finished items.
 
+- [ ] Emoji palette MRU
+- [ ] Emoji palette expansion
 - [ ] Replicate channel layout from official app
 - [ ] **Themes.** Add selectable color themes and persist the chosen theme in settings.
 - [ ] Investigate `conversations.history: invalid_ts_oldest` during unread checks; one rejected cursor stops the sweep for remaining conversations.

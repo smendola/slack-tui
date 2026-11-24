@@ -112,7 +112,7 @@ const chatSection = new BoxRenderable(renderer, {
 });
 pane.add(chatSection);
 const heading = new TextRenderable(renderer, { content: "Select a conversation", height: 1, fg: "#9ccfd8" });
-const headingRow = new BoxRenderable(renderer, { flexDirection: "row", alignItems: "center", columnGap: 1, flexShrink: 0, backgroundColor: "#444444" });
+const headingRow = new BoxRenderable(renderer, { flexDirection: "row", alignItems: "center", columnGap: 1, flexShrink: 0, backgroundColor: "#272735FF" });
 const headingPhoto = new BoxRenderable(renderer, { width: 4, height: 2, flexShrink: 0, visible: false });
 const headingPresence = new TextRenderable(renderer, { height: 1, visible: false, flexShrink: 0 });
 headingRow.add(headingPhoto);
