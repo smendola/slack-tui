@@ -23,7 +23,9 @@ import { restoreDraft } from "./drafts";
 import { lastConversation } from "./last-conversation";
 import { messageContent } from "./message-content";
 import { connectLive, applyLiveEvent, eventChannel, isNewMessage, type LiveEvent } from "./live";
+import { superviseReload, RELOAD_EXIT_CODE } from "./reload";
 
+await superviseReload();
 const demo = process.argv.includes("--demo");
 let settingsLoadError = "";
 let settings: Settings = await loadSettings().catch(error => {
@@ -133,7 +135,7 @@ menu.avatarSource = user => {
 const messageImageCache = new MessageImageCache(image => chat.readImage(image));
 let messageRenderVersion = 0;
 function clearMessages() {
-  reactionPalette = undefined;
+  closeReactionPalette();
   messageRenderVersion++;
   for (const child of [...messages.getChildren()]) {
     messages.remove(child);
@@ -204,37 +206,95 @@ function reactionIcon(name: string) {
   return name === "heart" ? "💗" : renderEmoji(`:${name}:`);
 }
 let reactionPalette: BoxRenderable | undefined;
+let reactionOverlay: BoxRenderable | undefined;
+let reactionAnchor: BoxRenderable | undefined;
+let reactionKey: ((name: string) => boolean) | undefined;
 function closeReactionPalette() {
-  if (reactionPalette?.parent) reactionPalette.parent.height = 1;
-  reactionPalette?.destroyRecursively();
+  if (reactionAnchor && !reactionAnchor.isDestroyed) reactionAnchor.height = 1;
+  reactionOverlay?.destroyRecursively();
+  reactionOverlay = undefined;
+  reactionAnchor = undefined;
+  reactionKey = undefined;
   reactionPalette = undefined;
 }
 function toggleReactionPalette(message: Message, picker: BoxRenderable, notice: TextRenderable) {
-  const wasOpen = reactionPalette?.parent === picker;
+  const wasOpen = reactionAnchor === picker;
   closeReactionPalette();
   if (wasOpen) return;
+  const overlay = new BoxRenderable(renderer, {
+    position: "absolute", left: 0, top: 0, width: "100%", height: "100%", zIndex: 1000,
+    onMouseDown(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeReactionPalette();
+    },
+  });
+  reactionOverlay = overlay;
+  reactionAnchor = picker;
+  renderer.root.add(overlay);
   const palette = new BoxRenderable(renderer, {
-    position: "absolute", left: 3, top: 0, zIndex: 10,
+    position: "absolute", left: picker.x + 3, top: picker.y,
     flexDirection: "row", flexWrap: "wrap",
     width: Math.max(6, Math.min(42, renderer.width - picker.x - 4)),
     border: true, borderStyle: "single", borderColor: "#686868", backgroundColor: "#272735FF",
+    onMouseDown(event) { event.preventDefault(); event.stopPropagation(); },
   });
   reactionPalette = palette;
-  picker.add(palette);
-  for (const name of paletteNames) {
-    palette.add(button(renderer, reactionIcon(name), () => {
-      closeReactionPalette();
-      const mine = message.reactions?.some(item => item.name === name && ownUserId && item.users?.includes(ownUserId));
-      void react(message, name, !mine, notice);
-    }, { background: "#272735FF", hover: "#505064FF", foreground: "#e0def4" }));
+  overlay.add(palette);
+  const choices: TextRenderable[] = [];
+  let highlighted = 0;
+  function highlight(index: number) {
+    highlighted = index;
+    choices.forEach((choice, i) => { choice.bg = i === index ? "#505064FF" : "#272735FF"; });
   }
+  function choose(name: string) {
+    closeReactionPalette();
+    const mine = message.reactions?.some(item => item.name === name && ownUserId && item.users?.includes(ownUserId));
+    void react(message, name, !mine, notice);
+  }
+  for (const name of paletteNames) {
+    const index = choices.length;
+    const choice = button(renderer, reactionIcon(name), () => choose(name),
+      { background: "#272735FF", hover: "#505064FF", foreground: "#e0def4" });
+    choice.onMouseOver = () => highlight(index);
+    choice.onMouseOut = () => highlight(highlighted);
+    choices.push(choice);
+    palette.add(choice);
+  }
+  highlight(0);
+  reactionKey = name => {
+    if (name === "escape") { closeReactionPalette(); return true; }
+    if (["return", "enter", "space"].includes(name)) { choose(paletteNames[highlighted]!); return true; }
+    if (name === "left" || name === "right") {
+      highlight((highlighted + (name === "left" ? -1 : 1) + choices.length) % choices.length);
+      return true;
+    }
+    if (name === "up" || name === "down") {
+      const current = choices[highlighted]!;
+      const rows = [...new Set(choices.map(choice => choice.y))].sort((a, b) => a - b);
+      const row = (rows.indexOf(current.y) + (name === "up" ? -1 : 1) + rows.length) % rows.length;
+      const next = choices.map((choice, index) => ({ choice, index }))
+        .filter(({ choice }) => choice.y === rows[row])
+        .sort((a, b) => Math.abs(a.choice.x - current.x) - Math.abs(b.choice.x - current.x))[0]!;
+      highlight(next.index);
+      return true;
+    }
+    return false;
+  };
+  function positionPalette() {
+    if (reactionPalette !== palette) return;
+    palette.left = Math.max(0, Math.min(picker.x + 3, renderer.width - palette.width));
+    palette.top = Math.max(0, Math.min(picker.y, renderer.height - palette.height));
+  }
+  overlay.on("resize", () => scroll.afterLayout(positionPalette));
   scroll.afterLayout(() => {
     if (reactionPalette !== palette) return;
-    // Absolute children don't reserve scrollable space. Keep the + at the top
-    // of its row while making room for the popup's measured height.
+    // Reserve space in the message row, even though the popup paints above the UI.
     picker.height = palette.height;
     scroll.afterLayout(() => {
-      if (reactionPalette === palette) scroll.scrollChildIntoView(palette);
+      if (reactionPalette !== palette) return;
+      scroll.scrollChildIntoView(picker);
+      scroll.afterLayout(positionPalette);
     });
   });
 }
@@ -972,13 +1032,28 @@ async function sendMessage() {
       : `${String(error)} · Draft kept; check Slack before retrying if delivery is uncertain.`);
   } finally { sending = false; }
 }
+let reloading = false;
+async function reloadApp() {
+  if (reloading) return;
+  if (sending || savingEdit) { report("Wait for the current send or edit to finish before reloading."); return; }
+  reloading = true;
+  closed = true;
+  const connection = live;
+  live = undefined;
+  await connection?.stop().catch(() => {});
+  renderer.destroy();
+  await renderer.closed;
+  process.exit(RELOAD_EXIT_CODE);
+}
 renderer.keyInput.on("keypress", key => {
-  if (!editing && !settingsOpen && !helpOpen && mentions.key(key)) return;
-  if (reactionPalette && !editing && !settingsOpen && !helpOpen && key.name === "escape") {
+  if (key.shift && key.name === "f5") {
     key.preventDefault();
-    closeReactionPalette();
+    void reloadApp();
     return;
   }
+  if (reactionKey?.(key.name)) { key.preventDefault(); return; }
+  if (reactionPalette) closeReactionPalette();
+  if (!editing && !settingsOpen && !helpOpen && mentions.key(key)) return;
   if (editing) {
     if (savingEdit) { key.preventDefault(); return; }
     if (key.ctrl && key.name === "s") { key.preventDefault(); void saveEdit(); }
