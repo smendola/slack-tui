@@ -1,6 +1,12 @@
-import { BoxRenderable, ScrollBoxRenderable, TextRenderable, type RenderContext } from "@opentui/core";
+import { BoxRenderable, ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, stringToStyledText, type RenderContext } from "@opentui/core";
 import { credentialsPath, settingsPath } from "./config-paths";
 import { button } from "./button";
+
+function highlightKeys(text: string) {
+  const keys = /(\b(?:Ctrl\+(?:Shift\+)?(?:[A-Z]|click)|Shift\+Enter|Page (?:Up|Down)|F[12]|Tab|Enter|Space|Escape|Esc|Up|Down|PgUp|PgDn|Home|End)\b|↑↓|^\/(?= in the sidebar))/gm;
+  return new StyledText(text.split(keys).flatMap((part, index) =>
+    index % 2 ? [bold(fg("#ffffff")(part))] : stringToStyledText(part).chunks));
+}
 
 export function createHelpScreen(context: RenderContext, close: () => void) {
   const screen = new BoxRenderable(context, {
@@ -87,14 +93,14 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
       content: title, fg: "#9ccfd8", width: "100%", flexShrink: 0, wrapMode: "word",
     }));
     scroll.add(new TextRenderable(context, {
-      content: `${lines.join("\n")}\n\n`, fg: "#e0def4", width: "100%", flexShrink: 0, wrapMode: "word",
+      content: highlightKeys(`${lines.join("\n")}\n\n`), fg: "#e0def4", width: "100%", flexShrink: 0, wrapMode: "word",
     }));
   }
   const actions = new BoxRenderable(context, { flexDirection: "row", flexShrink: 0, columnGap: 1 });
   screen.add(actions);
   actions.add(button(context, "Back", close));
   actions.add(new TextRenderable(context, {
-    content: "Esc / F1 · ↑↓ / PgUp / PgDn / mouse wheel: scroll · Home / End",
+    content: highlightKeys("Esc / F1 · ↑↓ / PgUp / PgDn / mouse wheel: scroll · Home / End"),
     fg: "#9ccfd8", flexShrink: 0, wrapMode: "word",
   }));
   return { screen, scroll };
