@@ -231,3 +231,7 @@ posting a duplicate.
 bun run check
 bun test
 ```
+
+## License
+
+[MIT](LICENSE) © 2026 Salvatore Mendola.
