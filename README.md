@@ -148,6 +148,10 @@ They apply across workspaces and persist between runs.
 
 ## DM presence
 
+Press **Ctrl+B** with the DM sidebar focused
+to hide or show bot and app conversations. The filter also applies to DM search
+and is remembered across restarts for each workspace and user.
+
 The DM sidebar shows **●** in green for active users, **○** for away, and **·**
 when presence is unknown. These reflect Slack's active/away status, including
 manually setting yourself away.

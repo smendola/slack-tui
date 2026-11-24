@@ -1,11 +1,23 @@
-import { BoxRenderable, ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, stringToStyledText, type RenderContext } from "@opentui/core";
+// Agent sessions: OC:x13-cachy:sal:ses_df1c1ceedffe0p5mflr3l2vNvR Edited
+import { BoxRenderable, ScrollBoxRenderable, TextRenderable, StyledText, bold, fg, link, underline, stringToStyledText, type RenderContext } from "@opentui/core";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { credentialsPath, settingsPath } from "./config-paths";
 import { button } from "./button";
 
 function highlightKeys(text: string) {
-  const keys = /(\b(?:Ctrl\+(?:Shift\+)?(?:[A-Z]|click)|Shift\+Enter|Page (?:Up|Down)|F[12]|Tab|Enter|Space|Escape|Esc|Up|Down|PgUp|PgDn|Home|End)\b|↑↓|^\/(?= in the sidebar))/gm;
+  const keys = /(\b(?:Ctrl\+(?:Shift\+)?(?:[A-Z]|click)|Shift\+Enter|Page (?:Up|Down)|F[12]|Tab|Enter|Space|Escape|Esc|Up|Down|PgUp|PgDn|Home|End|(?:[Dd]ouble-|[Tt]riple-)?[Cc]lick(?! (?:Remove image|Show profile photos)\b)|Remove image|Show profile photos|[Dd]rag|[Mm]ouse wheel)\b|↑↓|^\/(?= in the sidebar))/gm;
   return new StyledText(text.split(keys).flatMap((part, index) =>
     index % 2 ? [bold(fg("#ffffff")(part))] : stringToStyledText(part).chunks));
+}
+
+function pathLine(prefix: string, path: string, label = path, suffix = "") {
+  return new StyledText([
+    ...stringToStyledText(prefix).chunks,
+    link(pathToFileURL(path).href)(underline(fg("#9ccfd8")(label))),
+    ...stringToStyledText(suffix).chunks,
+  ]);
 }
 
 export function createHelpScreen(context: RenderContext, close: () => void) {
@@ -28,6 +40,7 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
       "/ in the sidebar, or click Search names — Search all names on the current tab, including inactive conversations. Esc clears the search.",
       "Click Channels or DMs, or press Ctrl+D, to switch lists. Group DMs are under Channels.",
       "Ctrl+L — Toggle active-only / all conversations.",
+      "Ctrl+B — Hide or show bots and apps in the DM sidebar, including in search results. Remembered per workspace and user.",
       "Ctrl+R — Refresh current messages, unread status and DM presence.",
       "Page Up / Page Down — Scroll messages.",
       "Ctrl+C — Quit.",
@@ -71,9 +84,9 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
       "The active-only sidebar hides conversations Slack marks dormant and explicitly closed DMs; it is not an online-user filter.",
     ]],
     ["Files and storage", [
-      `Credentials: ${credentialsPath}`,
-      `Settings: ${settingsPath}`,
-      "These paths honor XDG_CONFIG_HOME; otherwise they use ~/.config/slack-tui/.",
+      pathLine("Credentials: ", credentialsPath),
+      pathLine("Settings: ", settingsPath),
+      pathLine("These paths honor XDG_CONFIG_HOME; otherwise they use ", join(homedir(), ".config/slack-tui/"), "~/.config/slack-tui/", "."),
       "Credentials are saved with owner-only permissions. Settings save immediately.",
       "Messages, drafts, avatars and image previews are held in memory for this session, not saved as downloads.",
       "Sending an attached image uploads it to the selected Slack conversation.",
@@ -102,7 +115,11 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
       content: title, fg: "#9ccfd8", width: "100%", flexShrink: 0, wrapMode: "word",
     }));
     scroll.add(new TextRenderable(context, {
-      content: highlightKeys(`${lines.join("\n")}\n\n`), fg: "#e0def4", width: "100%", flexShrink: 0, wrapMode: "word",
+      content: new StyledText([...lines.flatMap(line => [
+        ...(typeof line === "string" ? highlightKeys(line) : line).chunks,
+        ...stringToStyledText("\n").chunks,
+      ]), ...stringToStyledText("\n").chunks]),
+      fg: "#e0def4", width: "100%", flexShrink: 0, wrapMode: "word",
     }));
   }
   const actions = new BoxRenderable(context, { flexDirection: "row", flexShrink: 0, columnGap: 1 });

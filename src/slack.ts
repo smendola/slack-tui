@@ -1,3 +1,4 @@
+// Agent sessions: OC:x13-cachy:sal:ses_df1c1ceedffe0p5mflr3l2vNvR Edited
 import { type ImageAttachment } from "./attachment";
 import { downloadMessageImage, type MessageImage } from "./message-images";
 import { renderEmoji } from "./emoji";
@@ -35,7 +36,7 @@ export type Message = {
     actions?: { text?: string; url?: string }[];
   }[];
 };
-type User = { id: string; name: string; profile?: { display_name?: string; real_name?: string; image_48?: string; image_72?: string } };
+type User = { id: string; name: string; is_bot?: boolean; is_app_user?: boolean; profile?: { display_name?: string; real_name?: string; image_48?: string; image_72?: string } };
 export interface Chat {
   users: Map<string, string>;
   avatars: Map<string, string>;
@@ -54,6 +55,7 @@ export interface Chat {
 }
 
 export class Slack implements Chat {
+  botUsers = new Set(["USLACKBOT"]);
   users = new Map<string, string>();
   avatars = new Map<string, string>();
   private blockedUntil = new Map<string, number>();
@@ -110,14 +112,16 @@ export class Slack implements Chat {
     const auth = await this.call<{ team: string; user: string; team_id: string; user_id: string }>("auth.test");
     this.userId = auth.user_id;
     const users = await this.pages<User>("users.list", "members");
-    for (const user of users) {
-      const name = user.profile?.display_name || user.profile?.real_name || user.name;
-      this.users.set(user.id, name);
-      this.users.set(user.name, name);
-      const avatar = user.profile?.image_72 || user.profile?.image_48;
-      if (avatar) this.avatars.set(user.id, avatar);
-    }
+    for (const user of users) this.rememberUser(user);
     return auth;
+  }
+  private rememberUser(user: User) {
+    const name = user.profile?.display_name || user.profile?.real_name || user.name;
+    this.users.set(user.id, name);
+    if (user.name) this.users.set(user.name, name);
+    const avatar = user.profile?.image_72 || user.profile?.image_48;
+    if (avatar) this.avatars.set(user.id, avatar);
+    if (user.is_bot || user.is_app_user) this.botUsers.add(user.id);
   }
   async channels() {
     const channels = await this.pages<Channel>("users.conversations", "channels", {
@@ -129,11 +133,7 @@ export class Slack implements Chat {
     for (const id of missing) {
       try {
         const { user } = await this.call<{ user: User }>("users.info", { user: id });
-        const name = user.profile?.display_name || user.profile?.real_name || user.name;
-        this.users.set(user.id, name);
-        if (user.name) this.users.set(user.name, name);
-        const avatar = user.profile?.image_72 || user.profile?.image_48;
-        if (avatar) this.avatars.set(user.id, avatar);
+        this.rememberUser(user);
       } catch {
         // Keep the conversation accessible under its ID if a profile is unavailable.
       }
@@ -320,7 +320,8 @@ export function messageText(message: Message, users: Map<string, string>) {
 }
 
 export class Demo implements Chat {
-  users = new Map([["alice", "Alice"], ["you", "You"]]);
+  botUsers = new Set(["USLACKBOT"]);
+  users = new Map([["alice", "Alice"], ["you", "You"], ["USLACKBOT", "Slackbot"]]);
   avatars = new Map<string, string>();
   private messages = new Map<string, Message[]>([
     ["general", [
@@ -344,7 +345,7 @@ export class Demo implements Chat {
     ["dm", [{ ts: "1770000400", user: "alice", text: "Hello <@you> — DMs work here too." }]],
   ]);
   async connect() { return { team: "Offline demo", user: "You", team_id: "demo", user_id: "you" }; }
-  async channels() { return [{ id: "general", name: "general" }, { id: "dev", name: "dev" }, { id: "dm", is_im: true, user: "alice" }]; }
+  async channels() { return [{ id: "general", name: "general" }, { id: "dev", name: "dev" }, { id: "dm", is_im: true, user: "alice" }, { id: "dm-bot", is_im: true, user: "USLACKBOT" }]; }
   async conversation(id: string): Promise<Channel> { return (await this.channels()).find(channel => channel.id === id) ?? { id }; }
   async history(channel: string) { return structuredClone((this.messages.get(channel) ?? []).filter(message => !message.thread_ts || message.thread_ts === message.ts)); }
   async replies(channel: string, ts: string) {

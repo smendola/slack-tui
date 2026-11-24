@@ -1,3 +1,4 @@
+// Agent sessions: OC:x13-cachy:sal:ses_df1c1ceedffe0p5mflr3l2vNvR Edited
 // Agent sessions: OC:x13-cachy:sal:ses_df58f4884ffeQ73n6oD4HRDj22 Edited
 import {
   BoxRenderable, TextRenderable, ScrollBoxRenderable, InputRenderable,
@@ -20,7 +21,7 @@ import { button } from "./button";
 import { createMentionPicker } from "./mentions";
 import { messageSelectionText } from "./message-selection";
 import { restoreDraft } from "./drafts";
-import { lastConversation } from "./last-conversation";
+import { dmBotFilter, lastConversation } from "./last-conversation";
 import { messageContent } from "./message-content";
 import { connectLive, applyLiveEvent, eventChannel, isNewMessage, type LiveEvent } from "./live";
 import { superviseReload, RELOAD_EXIT_CODE } from "./reload";
@@ -558,6 +559,8 @@ let lastOpened: ReturnType<typeof lastConversation> | undefined;
 let allChannels: Channel[] = [];
 let showDMs = false;
 let showAll = false;
+let hideBots = false;
+let savedBotFilter: ReturnType<typeof dmBotFilter> | undefined;
 const locallyRead = new Map<string, string>();
 let checkingUnread = false;
 let checkingPresence = false;
@@ -663,9 +666,17 @@ function switchSidebar(dms: boolean) {
   }
   menu.focus();
 }
+function toggleBotFilter() {
+  if (!savedBotFilter) return;
+  hideBots = !hideBots;
+  updateSidebar();
+  try { savedBotFilter.save(hideBots); }
+  catch (error) { report(`Could not save DM filter: ${String(error)}`); }
+}
 function updateSidebar(preferredId = selected?.id) {
   const query = search.value.trim().toLowerCase();
   const channels = allChannels.filter(channel => !!channel.is_im === showDMs
+    && !(showDMs && hideBots && channel.user && chat.botUsers.has(channel.user))
     && (query ? channelName(channel, chat.users).toLowerCase().includes(query)
       : showAll || channel.id === preferredId || isSidebarActive(channel)));
   sidebar.title = query ? `Matches (${channels.length})` : `${showAll ? "All" : "Active"} (${channels.length})`;
@@ -1216,6 +1227,9 @@ renderer.keyInput.on("keypress", key => {
   } else if (key.ctrl && key.name === "d") {
     key.preventDefault();
     switchSidebar(!showDMs);
+  } else if (showDMs && (menu.focused || search.focused) && key.ctrl && key.name === "b") {
+    key.preventDefault();
+    toggleBotFilter();
   } else if (key.ctrl && key.name === "l") {
     key.preventDefault();
     showAll = !showAll;
@@ -1260,6 +1274,9 @@ try {
       title.content = ` slack-tui · ${identity.team} · ${identity.user} · manual refresh`;
     }
     lastOpened = lastConversation(identity.team_id, identity.user_id);
+    savedBotFilter = dmBotFilter(identity.team_id, identity.user_id);
+    try { hideBots = savedBotFilter.read(); }
+    catch (error) { report(`Could not restore DM filter: ${String(error)}`); }
     let previousId: string | undefined;
     try { previousId = lastOpened.read(); }
     catch (error) { report(`Could not restore conversation: ${String(error)}`); }
