@@ -17,6 +17,7 @@ import { messageImages, MessageImageCache } from "./message-images";
 import { renderEmoji } from "./emoji";
 import { createHelpScreen } from "./help";
 import { button } from "./button";
+import { createMentionPicker } from "./mentions";
 import { messageSelectionText } from "./message-selection";
 import { restoreDraft } from "./drafts";
 import { lastConversation } from "./last-conversation";
@@ -182,6 +183,7 @@ const composer = new TextareaRenderable(renderer, {
   },
 });
 composerSection.add(composer);
+const mentions = createMentionPicker(renderer, composerSection, composer, chat.users);
 function setComposerExpanded(expanded: boolean) {
   composerExpanded = expanded;
   scroll.visible = !expanded;
@@ -879,12 +881,15 @@ function renderMessages() {
 async function load(channel: Channel) {
   if (closed) return;
   if (sending) { report("Wait for the current send to finish."); return; }
-  if (selected) drafts.set(selected.id, composer.plainText);
+  if (selected) drafts.set(selected.id, mentions.serialize());
   pasteGeneration++;
   const changedChannel = selected?.id !== channel.id;
   selected = channel;
   menu.activeChannelId = channel.id;
-  if (changedChannel) restoreDraft(composer, drafts.get(channel.id) ?? "");
+  if (changedChannel) {
+    restoreDraft(composer, drafts.get(channel.id) ?? "");
+    mentions.restoreLabels();
+  }
   updateAttachment();
   if (changedChannel) setComposerExpanded(composer.plainText.includes("\n"));
   updateHeading(channel);
@@ -934,7 +939,7 @@ menu.on(SelectRenderableEvents.ITEM_SELECTED, (_index, option) => {
   if (search.value && selected?.id === option.value.id) search.value = "";
 });
 async function sendMessage() {
-  const text = composer.plainText.trim();
+  const text = mentions.serialize().trim();
   const image = selected ? imageDrafts.get(selected.id) : undefined;
   if ((!text && !image) || !selected || sending || readingClipboard) return;
   const channel = selected;
@@ -956,7 +961,7 @@ async function sendMessage() {
       restoreDraft(composer, "");
       setComposerExpanded(false);
     }
-    drafts.set(channel.id, composer.plainText);
+    drafts.set(channel.id, mentions.serialize());
     if (imageDrafts.get(channel.id) === image) imageDrafts.delete(channel.id);
     updateAttachment();
     report(live ? "Sent" : "Sent · Ctrl+R to fetch incoming messages");
@@ -968,6 +973,7 @@ async function sendMessage() {
   } finally { sending = false; }
 }
 renderer.keyInput.on("keypress", key => {
+  if (!editing && !settingsOpen && !helpOpen && mentions.key(key)) return;
   if (reactionPalette && !editing && !settingsOpen && !helpOpen && key.name === "escape") {
     key.preventDefault();
     closeReactionPalette();

@@ -36,6 +36,7 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
       "Click ✎ beside your sent message. Ctrl+S saves; Esc cancels. Your composer draft is kept.",
       "Click the smiley-plus icon below a message to open its emoji palette. Click an emoji to toggle your reaction; ✓ means you reacted.",
       "Shift+Enter — Expand the composer and insert a newline.",
+      "Type @ and a name to mention someone. ↑/↓ chooses; Enter or Tab inserts; Escape closes. You can also click a match.",
       "Escape — Collapse the expanded composer, keeping the draft.",
       "Ctrl+V — Paste clipboard text or attach an image (composer focused).",
       "Ctrl+G — Remove the attached image.",
