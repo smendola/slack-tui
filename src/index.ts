@@ -16,7 +16,7 @@ import { defaultSettings, loadSettings, saveSettings, settingsPath, type Setting
 import { messageImages, MessageImageCache } from "./message-images";
 import { renderEmoji } from "./emoji";
 import { createHelpScreen } from "./help";
-import { button, buttonBackground } from "./button";
+import { button } from "./button";
 import { messageSelectionText } from "./message-selection";
 import { restoreDraft } from "./drafts";
 import { lastConversation } from "./last-conversation";
@@ -206,22 +206,22 @@ function closeReactionPalette() {
   reactionPalette?.destroyRecursively();
   reactionPalette = undefined;
 }
-function toggleReactionPalette(message: Message, column: BoxRenderable, notice: TextRenderable) {
-  const wasOpen = reactionPalette?.parent === column;
+function toggleReactionPalette(message: Message, picker: BoxRenderable, notice: TextRenderable) {
+  const wasOpen = reactionPalette?.parent === picker;
   closeReactionPalette();
   if (wasOpen) return;
   const palette = new BoxRenderable(renderer, {
-    flexDirection: "row", flexWrap: "wrap", flexShrink: 0, alignSelf: "flex-start", maxWidth: "100%",
-    border: true, borderStyle: "single", borderColor: "#686868", backgroundColor: buttonBackground,
+    flexDirection: "row", flexWrap: "wrap", flexShrink: 1, minWidth: 6, alignSelf: "flex-start", maxWidth: "100%",
+    border: true, borderStyle: "single", borderColor: "#686868", backgroundColor: "#272735FF",
   });
   reactionPalette = palette;
-  column.add(palette);
+  picker.add(palette);
   for (const name of paletteNames) {
     palette.add(button(renderer, reactionIcon(name), () => {
       closeReactionPalette();
       const mine = message.reactions?.some(item => item.name === name && ownUserId && item.users?.includes(ownUserId));
       void react(message, name, !mine, notice);
-    }));
+    }, { background: "#272735FF", hover: "#505064FF", foreground: "#e0def4" }));
   }
 }
 const pendingReactions = new Set<string>();
@@ -827,14 +827,19 @@ function renderMessages() {
       for (const reaction of message.reactions ?? []) {
         const mine = !!ownUserId && !!reaction.users?.includes(ownUserId);
         const label = `${reactionIcon(reaction.name)} ${reaction.count}${mine ? " ✓" : ""}`;
-        reactions.add(button(renderer, label, () => { void react(message, reaction.name, !mine, notice); }));
+        reactions.add(button(renderer, label, () => { void react(message, reaction.name, !mine, notice); },
+          { background: "#272735FF", hover: "#505064FF", foreground: "#e0def4" }));
       }
-      reactions.add(new ImageRenderable(renderer, {
-        source: reactionPickerIcon, width: 2, height: 1, fit: "fit",
+      const picker = new BoxRenderable(renderer, {
+        flexDirection: "row", flexShrink: 1, minWidth: 0, maxWidth: "100%", columnGap: 1,
+      });
+      reactions.add(picker);
+      picker.add(new ImageRenderable(renderer, {
+        source: reactionPickerIcon, width: 2, height: 1, flexShrink: 0, fit: "fit",
         onMouseDown(event) {
           if (event.button !== 0) return;
           event.stopPropagation();
-          toggleReactionPalette(message, textColumn, notice);
+          toggleReactionPalette(message, picker, notice);
         },
       }));
       textColumn.add(reactions);
