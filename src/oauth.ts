@@ -151,7 +151,7 @@ export function tokenProvider(initial: Credentials, path: string) {
   let refreshing: Promise<string> | undefined;
   return async () => {
     if (!current.expiresAt || current.expiresAt > Date.now() + 60_000) return current.token;
-    if (!current.clientId || !current.refreshToken) throw new Error("Slack token expired. Run bun run setup --replace.");
+    if (!current.clientId || !current.refreshToken) throw new Error("Slack token expired. Update the saved token or run bun run setup --new-app to create another Slack app.");
     if (!refreshing) {
       refreshing = (async () => {
         const data = await slackRequest<TokenResponse>("oauth.v2.access", {

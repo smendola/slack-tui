@@ -1,11 +1,22 @@
+// Agent sessions: OC:x13-cachy:sal:ses_df1c1ceedffe0p5mflr3l2vNvR Edited
 import { spawn } from "node:child_process";
-import { credentialsPath } from "./config-paths";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { configDirectory, credentialsPath } from "./config-paths";
 import { loadCredentials } from "./credentials";
 import { authorizationURL, createPKCE, exchangeUserToken, isAppToken, saveUserToken, slackRequest, startCallback, type App, type Credentials, type Manifest } from "./oauth";
 import { verifySocketConnection } from "./live";
 import { setupAction, setupManifest, setupOptions } from "./setup-options";
 
 const root = new URL("../", import.meta.url);
+const pendingPath = join(configDirectory, "pending-app");
+
+async function pendingApp() {
+  try { return (await readFile(pendingPath, "utf8")).trim(); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
 
 function openBrowser(url: string) {
   const command = process.platform === "darwin" ? "open" : "xdg-open";
@@ -99,13 +110,22 @@ async function setupSocket(credentials: Credentials, signal: AbortSignal, config
 async function setup() {
   const options = setupOptions(process.argv.slice(2));
   if (options.help) {
-    console.log("bun run setup [--replace] [--no-socket]\nbun run setup --socket\n\nDefault: create your Slack app, authorize your user, and configure and verify live Socket Mode events in one wizard.\nRequires a Slack app configuration access token and a browser on this machine. No tunnel or domain needed.\n\n--replace: connect a new app, including live events by default.\n--no-socket: skip Socket Mode setup (manual refresh only); does not remove an existing app-level token.\n--socket: add or repair Socket Mode for the existing connection; does not create an app.\n\nIf user authorization is already saved but Socket Mode is missing, plain setup resumes the live-events step.");
+    console.log(`bun run setup [--new-app] [--no-socket]
+bun run setup --socket
+
+Default: use the saved connection or create an app on first setup.
+If user authorization is saved but Socket Mode is missing, setup resumes the live-events step.
+Creating an app requires a Slack app configuration access token and a browser on this machine.
+
+--new-app: create another Slack app and switch the local connection to it. Any existing Slack app remains in the workspace.
+--no-socket: skip Socket Mode setup; does not remove an existing app-level token.
+--socket: add or repair Socket Mode for the existing connection without creating an app.`);
     return;
   }
-  const existing = options.replace ? undefined : await loadCredentials({ ignoreInvalidAppToken: options.socket });
+  const existing = options.newApp ? undefined : await loadCredentials({ ignoreInvalidAppToken: options.socket });
   const action = setupAction(options, existing);
   if (action === "ready") {
-    console.log("Slack is already configured. Run bun start, bun run setup --socket to repair live events, or bun run setup --replace to connect a new app.");
+    console.log("Slack is already configured. Run bun start, bun run setup --socket to repair live events, or bun run setup --new-app to create another app.");
     return;
   }
   const controller = new AbortController();
@@ -121,6 +141,12 @@ async function setup() {
       await setupSocket(existing!, signal);
       console.log("Setup complete. Run bun start (or restart slack-tui) and look for LIVE in the title.");
       return;
+    }
+    if (options.newApp) {
+      console.log("This creates another Slack app. Your existing app will remain in the workspace. Only the local connection changes after authorization.");
+    } else {
+      const pending = await pendingApp();
+      if (pending !== undefined) throw new Error(`A previous setup created a Slack app but did not finish. Open https://api.slack.com/apps/${encodeURIComponent(pending)}/oauth and follow the README's manual setup steps, or run bun run setup --new-app to create another app.`);
     }
     console.log("This wizard will create the Slack app for you. Do not click Create New App.");
     console.log("Run this command on the same machine as your browser. Setup uses a local OAuth callback.");
@@ -143,7 +169,9 @@ async function setup() {
     manifest.oauth_config.redirect_urls = [redirect];
     manifest.oauth_config.pkce_enabled = true;
     console.log("Creating app with the permissions in slack-app.yaml…");
+    await mkdir(configDirectory, { recursive: true, mode: 0o700 });
     app = await slackRequest<App>("apps.manifest.create", { manifest: JSON.stringify(manifest) }, `Bearer ${configToken}`, signal);
+    if (app.app_id) await writeFile(pendingPath, app.app_id, { mode: 0o600 });
     if (!app.app_id || !app.credentials?.client_id) throw new Error("Slack returned incomplete app credentials.");
     console.log(`Created app ${app.app_id}. Approve access in your browser (workspace admin approval may be required).`);
     const url = authorizationURL(app, redirect, callback.state, manifest.oauth_config.scopes.user, pkce.challenge);
@@ -156,6 +184,7 @@ async function setup() {
     credentials.appId = app.app_id;
     await saveUserToken(credentialsPath, credentials.token, { ...credentials, appToken: "" });
     saved = true;
+    await rm(pendingPath, { force: true });
     console.log(`Connected to ${identity.team} as ${identity.user}. Saved credentials to ${credentialsPath} (owner-only permissions).`);
     await callback.stop();
     callback = undefined;
@@ -175,7 +204,7 @@ async function setup() {
     await callback?.stop();
     if (app?.app_id && !saved) {
       console.log(`App ${app.app_id} was created but setup did not finish. Existing credentials were not changed.`);
-      console.log(`You can install it manually at https://api.slack.com/apps/${app.app_id}/oauth or delete it before retrying. Each setup run creates a new app.`);
+      console.log(`Install it manually at https://api.slack.com/apps/${app.app_id}/oauth or run bun run setup --new-app to create another app.`);
     }
   }
 }

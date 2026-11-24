@@ -66,8 +66,8 @@ Setup uses OAuth with PKCE and a temporary localhost callback. The configuration
 token is not saved. Credentials are written with owner-only permissions outside
 the project directory. `XDG_CONFIG_HOME` overrides the default `~/.config` directory.
 If Slack issues expiring credentials, the client saves and refreshes them automatically.
-If authorization expires and refresh is no longer possible, reconnect with
-`bun run setup --replace`.
+If authorization expires and refresh is no longer possible, update your saved user
+token or use `bun run setup --new-app` to connect through a new Slack app.
 
 ### Setup options and recovery
 
@@ -75,16 +75,18 @@ If authorization expires and refresh is no longer possible, reconnect with
   authorization is already saved but the app-level token is missing, it resumes
   the live-events step without creating another app.
 - **`bun run setup --no-socket`** — skip Socket Mode setup. It can also be
-  combined with `--replace`. It does not remove an already-configured app-level token.
+  combined with `--new-app`. It does not remove an already-configured app-level token.
 - **`bun run setup --socket`** — add or repair live events for the existing
   connection without creating an app.
-- **`bun run setup --replace`** — create and authorize a new app, including
-  Socket Mode setup by default.
+- **`bun run setup --new-app`** — create and authorize another Slack app, including
+  Socket Mode setup by default. Only the local connection switches; the existing
+  app remains in your workspace.
 
 User credentials are saved after successful authorization. If the live-events
 step is interrupted, rerun `bun run setup` to finish it. If setup stops before
-user authorization is saved, it prints the new app's settings URL so you can
-finish installation manually or delete it before retrying.
+user authorization is saved, the wizard records the created app's ID. On a
+retry with the same config directory and no saved connection, it shows the app
+URL so you can finish installation manually instead of creating a duplicate.
 
 ### Manual setup
 
