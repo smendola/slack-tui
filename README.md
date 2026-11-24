@@ -6,6 +6,7 @@ A Slack chat client for your terminal, written in TypeScript with
 Browse channels and DMs, receive live updates, send messages as yourself, and paste images with captions.
 The interface includes user avatars, a draggable pane split, and an expandable
 multiline composer.
+Threads open alongside the channel, with live replies and independent drafts.
 
 ## Getting started
 
@@ -213,14 +214,13 @@ user token scope and reauthorization to add or remove reactions.
 
 ## Current limitations
 
-- **Recent history only:** loads up to 50 messages per conversation.
+- **Recent channel history only:** loads up to 50 messages per conversation; opened threads fetch all reply pages.
 - **Basic formatting:** resolves mentions, links and bot attachment details,
   but does not yet render styled Markdown.
 - **Approximate active-only sidebar:** hides conversations Slack marks dormant
   and explicitly closed DMs. Ctrl+L reveals all loaded conversations. Activity
   metadata is loaded at startup; custom sections and muted preferences aren't synced.
-- No thread navigation, message search or persistent
-  message cache yet.
+- No message search or persistent message cache yet.
 
 If a send reports an uncertain delivery, check Slack before retrying to avoid
 posting a duplicate.

@@ -24,6 +24,8 @@ import { lastConversation } from "./last-conversation";
 import { messageContent } from "./message-content";
 import { connectLive, applyLiveEvent, eventChannel, isNewMessage, type LiveEvent } from "./live";
 import { superviseReload, RELOAD_EXIT_CODE } from "./reload";
+import { ThreadPanel } from "./thread-panel";
+import { threadLabel } from "./threads";
 
 await superviseReload();
 const demo = process.argv.includes("--demo");
@@ -51,18 +53,30 @@ root.add(title);
 const body = new BoxRenderable(renderer, {
   flexDirection: "row", flexGrow: 1, minHeight: 0,
   onMouseDown(event) {
-    if (event.button !== 0 || (event.x !== sidebar.x + sidebar.width - 1 && event.x !== pane.x)) return;
+    if (event.button === 0 && thread.open && !threadNarrow && event.x === thread.pane.x) {
+      threadDrag = { x: event.x, width: thread.pane.width };
+      event.stopPropagation();
+      return;
+    }
+    if (event.button !== 0 || (event.x !== sidebar.x + sidebar.width - 1 && event.x !== (threadNarrow ? thread.pane.x : pane.x))) return;
     dragStart = { x: event.x, width: sidebar.width };
     event.stopPropagation();
   },
   onMouseDrag(event) {
+    if (threadDrag) {
+      const available = body.width - sidebar.width;
+      threadRatio = Math.max(0.25, Math.min(0.65, (threadDrag.width + threadDrag.x - event.x) / available));
+      layoutThread();
+      event.stopPropagation();
+      return;
+    }
     if (!dragStart) return;
     preferredSidebarWidth = dragStart.width + event.x - dragStart.x;
     resizeSidebar();
     event.stopPropagation();
   },
-  onMouseUp() { finishDrag(); },
-  onMouseDragEnd() { finishDrag(); },
+  onMouseUp() { finishDrag(); threadDrag = undefined; },
+  onMouseDragEnd() { finishDrag(); threadDrag = undefined; },
 });
 root.add(body);
 const sidebar = new BoxRenderable(renderer, { width: 28, flexShrink: 0, border: true, title: "Conversations", borderColor: "#524f67" });
@@ -100,6 +114,7 @@ function resizeSidebar() {
   const minimum = Math.min(18, Math.floor(available / 3));
   const maximum = Math.max(minimum, available - Math.min(30, Math.floor(available * 2 / 3)));
   sidebar.width = Math.max(minimum, Math.min(maximum, preferredSidebarWidth));
+  if (typeof thread !== "undefined") layoutThread();
 }
 function finishDrag() {
   if (!dragStart) return;
@@ -186,6 +201,46 @@ const composer = new TextareaRenderable(renderer, {
 });
 composerSection.add(composer);
 const mentions = createMentionPicker(renderer, composerSection, composer, chat.users);
+let threadRatio = 0.4;
+let threadNarrow = false;
+let hiddenChannelScroll = 0;
+let threadDrag: { x: number; width: number } | undefined;
+let threadReturnFocus: "menu" | "composer" = "composer";
+const thread = new ThreadPanel(renderer, chat, {
+  render: (items, container) => renderMessageList(items, container, true),
+  report,
+  layout: layoutThread,
+  closed() {
+    closeReactionPalette();
+    if (threadReturnFocus === "menu") menu.focus(); else composer.focus();
+    updateFooter();
+  },
+  canRender: () => !closed && !editing && !helpOpen && !settingsOpen && !reactionPalette && !renderer.getSelection()?.getSelectedText(),
+  summary(channel, parent) {
+    if (selected?.id !== channel) return;
+    currentMessages = currentMessages.map(message => message.ts === parent.ts ? { ...message, ...parent } : message);
+    liveDirty = true;
+    scheduleLiveRender();
+  },
+});
+body.add(thread.pane);
+function layoutThread() {
+  const available = Math.max(0, body.width - sidebar.width);
+  const wasNarrow = threadNarrow;
+  threadNarrow = thread.open && available < 85;
+  if (threadNarrow && !wasNarrow) hiddenChannelScroll = scroll.scrollTop;
+  pane.visible = !threadNarrow;
+  if (wasNarrow && !threadNarrow) scroll.scrollTo(hiddenChannelScroll);
+  thread.pane.visible = thread.open;
+  thread.pane.width = threadNarrow ? available : Math.max(30, Math.floor(available * threadRatio));
+  thread.setNarrow(threadNarrow);
+}
+function openThread(message: Message) {
+  if (!selected) return;
+  closeReactionPalette();
+  if (!thread.open) threadReturnFocus = menu.focused ? "menu" : "composer";
+  void thread.show(selected.id, message, channelName(selected, chat.users));
+}
 function setComposerExpanded(expanded: boolean) {
   composerExpanded = expanded;
   scroll.visible = !expanded;
@@ -217,7 +272,8 @@ function closeReactionPalette() {
   reactionKey = undefined;
   reactionPalette = undefined;
 }
-function toggleReactionPalette(message: Message, picker: BoxRenderable, notice: TextRenderable) {
+function toggleReactionPalette(message: Message, picker: BoxRenderable, notice: TextRenderable, inThread = false) {
+  const paletteScroll = inThread ? thread.scroll : scroll;
   const wasOpen = reactionAnchor === picker;
   closeReactionPalette();
   if (wasOpen) return;
@@ -250,7 +306,7 @@ function toggleReactionPalette(message: Message, picker: BoxRenderable, notice: 
   function choose(name: string) {
     closeReactionPalette();
     const mine = message.reactions?.some(item => item.name === name && ownUserId && item.users?.includes(ownUserId));
-    void react(message, name, !mine, notice);
+    void react(message, name, !mine, notice, inThread);
   }
   for (const name of paletteNames) {
     const index = choices.length;
@@ -286,22 +342,22 @@ function toggleReactionPalette(message: Message, picker: BoxRenderable, notice: 
     palette.left = Math.max(0, Math.min(picker.x + 3, renderer.width - palette.width));
     palette.top = Math.max(0, Math.min(picker.y, renderer.height - palette.height));
   }
-  overlay.on("resize", () => scroll.afterLayout(positionPalette));
-  scroll.afterLayout(() => {
+  overlay.on("resize", () => paletteScroll.afterLayout(positionPalette));
+  paletteScroll.afterLayout(() => {
     if (reactionPalette !== palette) return;
     // Reserve space in the message row, even though the popup paints above the UI.
     picker.height = palette.height;
-    scroll.afterLayout(() => {
+    paletteScroll.afterLayout(() => {
       if (reactionPalette !== palette) return;
-      scroll.scrollChildIntoView(picker);
-      scroll.afterLayout(positionPalette);
+      paletteScroll.scrollChildIntoView(picker);
+      paletteScroll.afterLayout(positionPalette);
     });
   });
 }
 const pendingReactions = new Set<string>();
-async function react(message: Message, name: string, add: boolean, notice: TextRenderable) {
+async function react(message: Message, name: string, add: boolean, notice: TextRenderable, inThread = false) {
   const channel = selected?.id;
-  if (!channel || !ownUserId || !currentMessages.includes(message)) return;
+  if (!channel || !ownUserId || !(inThread ? thread.items : currentMessages).includes(message)) return;
   const key = JSON.stringify([channel, message.ts, name]);
   if (pendingReactions.has(key)) return;
   pendingReactions.add(key);
@@ -310,9 +366,12 @@ async function react(message: Message, name: string, add: boolean, notice: TextR
   try {
     await chat.setReaction(channel, message.ts, name, add);
     if (closed || channel !== selected?.id) return;
-    const current = currentMessages.find(item => item.ts === message.ts);
+    const current = (inThread ? thread.items : currentMessages).find(item => item.ts === message.ts);
     if (!current) return;
     updateReaction(current, ownUserId, name, add);
+    if (thread.open) thread.update(current);
+    const channelMessage = currentMessages.find(item => item.ts === message.ts);
+    if (channelMessage && channelMessage !== current) channelMessage.reactions = current.reactions;
     const position = scroll.scrollTop;
     renderMessages();
     scroll.scrollTo(position);
@@ -326,7 +385,7 @@ async function react(message: Message, name: string, add: boolean, notice: TextR
     report(failure);
   } finally { pendingReactions.delete(key); }
 }
-let editing: { channel: string; ts: string } | undefined;
+let editing: { channel: string; ts: string; inThread: boolean } | undefined;
 let savingEdit = false;
 const editScreen = new BoxRenderable(renderer, {
   flexGrow: 1, minHeight: 0, flexDirection: "column", border: true, title: "Edit sent message", visible: false,
@@ -338,9 +397,9 @@ const editActions = new BoxRenderable(renderer, { flexDirection: "row", height: 
 editScreen.add(editActions);
 editActions.add(button(renderer, "Save", saveEdit));
 editActions.add(button(renderer, "Cancel", cancelEdit));
-function openEdit(message: Message) {
+function openEdit(message: Message, inThread = false) {
   if (!selected || editing) return;
-  editing = { channel: selected.id, ts: message.ts };
+  editing = { channel: selected.id, ts: message.ts, inThread };
   body.visible = false;
   editScreen.visible = true;
   restoreDraft(editText, message.text ?? "");
@@ -349,10 +408,11 @@ function openEdit(message: Message) {
 }
 function cancelEdit() {
   if (savingEdit) return;
+  const returnToThread = editing?.inThread;
   editing = undefined;
   editScreen.visible = false;
   body.visible = true;
-  composer.focus();
+  if (returnToThread && thread.open) thread.composer.focus(); else composer.focus();
 }
 async function saveEdit() {
   if (!editing || savingEdit) return;
@@ -364,6 +424,8 @@ async function saveEdit() {
     await chat.edit(channel, ts, text);
     if (closed) return;
     const message = currentMessages.find(message => message.ts === ts);
+    const reply = thread.items.find(message => message.ts === ts);
+    if (reply && thread.channel === channel) thread.update({ ...reply, text });
     if (message && selected?.id === channel) {
       message.text = text;
       const position = scroll.scrollTop;
@@ -380,8 +442,10 @@ async function saveEdit() {
 let settingsOpen = false;
 let settingsSaving = false;
 let returnToComposer = false;
+let settingsReturnToThread = false;
 let helpOpen = false;
 let helpReturnToComposer = false;
+let helpReturnToThread = false;
 const settingsScreen = new BoxRenderable(renderer, {
   flexGrow: 1, minHeight: 0, flexDirection: "column", padding: 1,
   border: true, title: "Settings", borderColor: "#524f67", visible: false, focusable: true,
@@ -404,6 +468,7 @@ function updateSettingsScreen() {
 function openSettings() {
   if (settingsOpen) return;
   returnToComposer = composer.focused;
+  settingsReturnToThread = thread.composer.focused;
   settingsOpen = true;
   body.visible = false;
   settingsScreen.visible = true;
@@ -415,7 +480,8 @@ function closeSettings() {
   settingsOpen = false;
   settingsScreen.visible = false;
   body.visible = true;
-  if (returnToComposer) composer.focus(); else menu.focus();
+  if (settingsReturnToThread && thread.open) thread.composer.focus();
+  else if (returnToComposer) composer.focus(); else menu.focus();
 }
 async function toggleProfilePhotos() {
   if (settingsSaving || !settingsOpen) return;
@@ -434,6 +500,7 @@ async function toggleProfilePhotos() {
       renderMessages();
       scroll.scrollTo(position);
     }
+    if (thread.open) thread.draw();
   } catch (error) {
     settingsLoadError = `Could not save settings: ${String(error)}`;
   } finally {
@@ -446,6 +513,7 @@ root.add(help.screen);
 function openHelp() {
   if (helpOpen) return;
   helpReturnToComposer = composer.focused;
+  helpReturnToThread = thread.composer.focused;
   helpOpen = true;
   body.visible = false;
   settingsScreen.visible = false;
@@ -460,6 +528,7 @@ function closeHelp() {
   settingsScreen.visible = settingsOpen;
   body.visible = !settingsOpen;
   if (settingsOpen) settingsScreen.focus();
+  else if (helpReturnToThread && thread.open) thread.composer.focus();
   else if (helpReturnToComposer) composer.focus();
   else menu.focus();
 }
@@ -473,13 +542,16 @@ function updateFooter() {
   if (editing) footer.content = " Ctrl+S: save edit · Enter: newline · Esc: cancel";
   else if (settingsOpen) footer.content = " Space/Enter: toggle · Esc: back · F1: help";
   else if (search.focused) footer.content = " Type a name · ↑↓: choose · Enter: open · Esc: clear · F1: help";
+  else if (thread.composer.focused) {
+    footer.content = " Enter: reply · Shift+Enter: newline · Ctrl+V: paste · Esc: close thread · Tab: sidebar · F1: help";
+  }
   else if (composer.focused) {
-    footer.content = ` Enter: send · Shift+Enter: newline · ${composerExpanded ? "Esc: collapse" : "Ctrl+V: paste"} · Tab: sidebar · F1: help`;
+    footer.content = ` Enter: send · Shift+Enter: newline · ${composerExpanded ? "Esc: collapse" : "Ctrl+V: paste"} · Tab: ${thread.open ? "thread" : "sidebar"} · F1: help`;
   } else {
     footer.content = " /: search · ↑↓: choose · Enter/Space: open · Ctrl+D: DMs · Ctrl+L: active/all · Tab: write · F1: help";
   }
 }
-for (const pane of [menu, search, composer, editText, settingsScreen, help.screen]) pane.on("focused", updateFooter);
+for (const pane of [menu, search, composer, thread.composer, editText, settingsScreen, help.screen]) pane.on("focused", updateFooter);
 
 let selected: Channel | undefined;
 let lastOpened: ReturnType<typeof lastConversation> | undefined;
@@ -648,13 +720,13 @@ function scheduleLiveRender() {
     liveDirty = false;
     renderMessages();
     scroll.scrollTo(atBottom ? Infinity : position);
-    if (atBottom && selected) {
+    if (atBottom && selected && !threadNarrow) {
       if (liveReadTimer) clearTimeout(liveReadTimer);
       const channel = selected;
       const latest = currentMessages.at(-1)?.ts;
       liveReadTimer = setTimeout(() => {
         liveReadTimer = undefined;
-        if (closed || selected !== channel || loadingHistory || editing || helpOpen || settingsOpen || composerExpanded
+        if (closed || selected !== channel || loadingHistory || editing || helpOpen || settingsOpen || composerExpanded || threadNarrow
           || scroll.scrollTop + scroll.viewport.height < scroll.scrollHeight - 1 || !latest) return;
         readLocally(channel, [{ ts: latest }]);
         void chat.markRead(channel.id, latest).catch(() => report("Live messages received; Slack read update failed. Ctrl+R to retry."));
@@ -664,6 +736,7 @@ function scheduleLiveRender() {
 }
 function receiveLive(event: LiveEvent) {
   if (closed) return;
+  thread.receive(event);
   const id = eventChannel(event);
   if (!id) return;
   liveJournal.push({ revision: ++liveRevision, event });
@@ -724,6 +797,7 @@ async function resyncLive() {
 }
 renderer.once("destroy", () => {
   closed = true;
+  thread.dispose();
   if (liveTimer) clearTimeout(liveTimer);
   if (liveReadTimer) clearTimeout(liveReadTimer);
   if (resyncTimer) clearTimeout(resyncTimer);
@@ -736,8 +810,8 @@ function hostClipboard() {
   return clipboard ??= createHostClipboard({ maxReadBytes: MAX_IMAGE_BYTES, timeoutMs: 5_000, maxImagePixels: 40_000_000 });
 }
 renderer.on("selection", (selection: Selection | null) => {
-  if (closed || helpOpen || settingsOpen || composerExpanded) return;
-  const text = messageSelectionText(selection, messages);
+  if (closed || helpOpen || settingsOpen) return;
+  const text = messageSelectionText(selection, messages) || messageSelectionText(selection, thread.messages);
   if (!text) return;
   const request = ++copyGeneration;
   // Serialize writes so an older clipboard operation cannot overwrite a newer selection.
@@ -769,14 +843,16 @@ function removeImage() {
   composer.focus();
 }
 async function pasteClipboard() {
-  if (readingClipboard || sending || !selected) return;
+  if (readingClipboard || sending || thread.sending || !selected) return;
+  const inThread = thread.open && thread.composer.focused;
+  const threadKey = thread.key;
   const channel = selected.id;
   const request = ++pasteGeneration;
   readingClipboard = true;
   report("Reading clipboard…");
   try {
     const result = await hostClipboard().read({ preferredTypes: ["image/png", "image/jpeg", "image/webp", "image/gif", "text/plain"] });
-    if (closed || request !== pasteGeneration || selected?.id !== channel) return;
+    if (closed || request !== pasteGeneration || selected?.id !== channel || (inThread && thread.key !== threadKey)) return;
     if (result.status !== "read") {
       report(`Clipboard ${result.status}. Ctrl+V reads this machine's clipboard; terminal paste still works for text.`);
       return;
@@ -784,13 +860,16 @@ async function pasteClipboard() {
     const { mimeType, bytes } = result.representation;
     if (mimeType === "text/plain") {
       const text = new TextDecoder().decode(bytes).replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
-      if (text.includes("\n")) setComposerExpanded(true);
-      composer.insertText(text);
+      if (inThread) thread.insertText(text);
+      else {
+        if (text.includes("\n")) setComposerExpanded(true);
+        composer.insertText(text);
+      }
       report("Text pasted");
     } else {
       const image = clipboardImage(bytes, mimeType);
-      imageDrafts.set(channel, image);
-      updateAttachment();
+      if (inThread) thread.attach(image);
+      else { imageDrafts.set(channel, image); updateAttachment(); }
       report("Image attached · Enter sends image + caption · Ctrl+G removes");
     }
   } catch (error) { if (request === pasteGeneration) report(String(error)); }
@@ -816,11 +895,13 @@ function dateDivider(date: Date, currentYear: number) {
 }
 function renderMessages() {
   clearMessages();
-  const version = messageRenderVersion;
   if (!currentMessages.length) { showMessageStatus("No messages yet."); return; }
+  renderMessageList(currentMessages, messages);
+}
+function renderMessageList(items: Message[], messages: BoxRenderable, inThread = false) {
   let previousDay: string | undefined;
   const currentYear = new Date().getFullYear();
-  for (const message of currentMessages) {
+  for (const message of items) {
     const timestamp = new Date(Number(message.ts) * 1000);
     const day = timestamp.toDateString();
     if (day !== previousDay && Number.isFinite(timestamp.getTime())) {
@@ -853,12 +934,12 @@ function renderMessages() {
     if (ownUserId && message.user === ownUserId && message.text && !message.files?.some(file => file.previewBytes)) {
       header.add(new TextRenderable(renderer, {
         content: " ✎ ", fg: "#9ccfd8", selectable: false,
-        onMouseDown(event) { if (event.button === 0) { event.stopPropagation(); openEdit(message); } },
+        onMouseDown(event) { if (event.button === 0) { event.stopPropagation(); openEdit(message, inThread); } },
       }));
     }
     textColumn.add(new TextRenderable(renderer, {
       width: "100%", flexShrink: 0, fg: "#e0def4", wrapMode: "word",
-      content: messageContent(message, chat.users, `${files ? `\n${files}` : ""}${message.reply_count ? `\n↳ ${message.reply_count} replies (not loaded)` : ""}`),
+      content: messageContent(message, chat.users, files ? `\n${files}` : ""),
     }));
     for (const source of images) {
       const label = new TextRenderable(renderer, {
@@ -870,13 +951,13 @@ function renderMessages() {
       const image = new ImageRenderable(renderer, {
         width: "100%", maxWidth: 60, height: 8, flexShrink: 0, fit: "fit",
         onLoad: loaded => {
-          if (closed || version !== messageRenderVersion) return;
+          if (closed || row.isDestroyed) return;
           aspect = loaded.height / Math.max(1, loaded.width);
           resizeImage();
           label.content = displayText(source.label, chat.users);
         },
         onError: () => {
-          if (closed || version !== messageRenderVersion) return;
+          if (closed || row.isDestroyed) return;
           image.visible = false;
           label.content = `[image: ${displayText(source.label, chat.users)}] Preview unavailable`;
         },
@@ -888,9 +969,9 @@ function renderMessages() {
       image.on("resize", resizeImage);
       textColumn.add(image);
       void messageImageCache.get(source).then(bytes => {
-        if (!closed && version === messageRenderVersion) image.source = bytes;
+        if (!closed && !row.isDestroyed) image.source = bytes;
       }).catch(error => {
-        if (closed || version !== messageRenderVersion) return;
+        if (closed || row.isDestroyed) return;
         image.visible = false;
         label.content = `[image: ${displayText(source.label, chat.users)}] ${displayText(String(error), chat.users)}`;
       });
@@ -901,7 +982,7 @@ function renderMessages() {
       for (const reaction of message.reactions ?? []) {
         const mine = !!ownUserId && !!reaction.users?.includes(ownUserId);
         const label = `${reactionIcon(reaction.name)} ${reaction.count}${mine ? " ✓" : ""}`;
-        reactions.add(button(renderer, label, () => { void react(message, reaction.name, !mine, notice); },
+        reactions.add(button(renderer, label, () => { void react(message, reaction.name, !mine, notice, inThread); },
           { background: "#272735FF", hover: "#505064FF", foreground: "#e0def4" }));
       }
       const picker = new BoxRenderable(renderer, {
@@ -913,9 +994,13 @@ function renderMessages() {
         onMouseDown(event) {
           if (event.button !== 0) return;
           event.stopPropagation();
-          toggleReactionPalette(message, picker, notice);
+          toggleReactionPalette(message, picker, notice, inThread);
         },
       }));
+      if (!inThread) {
+        reactions.add(button(renderer, threadLabel(message), () => openThread(message),
+          { background: "#272735FF", hover: "#505064FF", foreground: "#9ccfd8" }));
+      }
       textColumn.add(reactions);
       textColumn.add(notice);
     }
@@ -926,15 +1011,20 @@ function renderMessages() {
       const avatarTarget = avatarColumn;
       const initialsFallback = fallback;
       void avatarCache.get(url).then(bytes => {
-        if (!bytes || closed || version !== messageRenderVersion) return;
+        if (!bytes || closed || row.isDestroyed) return;
         const avatar = new ImageRenderable(renderer, {
           width: 4, height: 2, position: "absolute", top: 0, left: 0, fit: "fit",
-          onLoad: () => { if (!closed && version === messageRenderVersion) initialsFallback.visible = false; },
-          onError: () => { if (!closed && version === messageRenderVersion) initialsFallback.visible = true; },
+          onLoad: () => { if (!closed && !row.isDestroyed) initialsFallback.visible = false; },
+          onError: () => { if (!closed && !row.isDestroyed) initialsFallback.visible = true; },
         });
         avatarTarget.add(avatar);
         avatar.source = bytes;
       });
+    }
+    if (inThread && message.ts === thread.rootTs) {
+      messages.add(new TextRenderable(renderer, {
+        content: "─ Replies ─", fg: "#908caa", height: 1, flexShrink: 0, selectable: false,
+      }));
     }
   }
 }
@@ -944,6 +1034,7 @@ async function load(channel: Channel) {
   if (selected) drafts.set(selected.id, mentions.serialize());
   pasteGeneration++;
   const changedChannel = selected?.id !== channel.id;
+  if (changedChannel) thread.close();
   selected = channel;
   menu.activeChannelId = channel.id;
   if (changedChannel) {
@@ -1035,7 +1126,7 @@ async function sendMessage() {
 let reloading = false;
 async function reloadApp() {
   if (reloading) return;
-  if (sending || savingEdit) { report("Wait for the current send or edit to finish before reloading."); return; }
+  if (sending || savingEdit || thread.sending) { report("Wait for the current send or edit to finish before reloading."); return; }
   reloading = true;
   closed = true;
   const connection = live;
@@ -1086,6 +1177,7 @@ renderer.keyInput.on("keypress", key => {
     else if (["space", "return", "enter"].includes(key.name)) void toggleProfilePhotos();
     return;
   }
+  if (thread.handleKey(key)) return;
   if (menu.focused && key.name === "space" && !key.ctrl && !key.meta && !key.super && !key.hyper) {
     key.preventDefault();
     menu.selectCurrent();
@@ -1101,12 +1193,12 @@ renderer.keyInput.on("keypress", key => {
     if (key.name === "up") menu.moveUp(1);
     else if (key.name === "down") menu.moveDown(1);
     else if (menu.getSelectedOption()) { menu.focus(); menu.selectCurrent(); }
-  } else if (composer.focused && key.ctrl && key.name === "v") {
+  } else if ((composer.focused || thread.composer.focused) && key.ctrl && key.name === "v") {
     key.preventDefault();
     void pasteClipboard();
   } else if (key.ctrl && key.name === "g") {
     key.preventDefault();
-    removeImage();
+    if (thread.composer.focused) thread.attach(undefined); else removeImage();
   } else if (composer.focused && key.shift && (key.name === "return" || key.name === "enter")) {
     key.preventDefault();
     setComposerExpanded(true);
@@ -1116,7 +1208,11 @@ renderer.keyInput.on("keypress", key => {
     setComposerExpanded(false);
   } else if (key.name === "tab") {
     key.preventDefault();
-    if (composer.focused) menu.focus(); else composer.focus();
+    if (thread.composer.focused) menu.focus();
+    else if (composer.focused && thread.open) thread.composer.focus();
+    else if (composer.focused) menu.focus();
+    else if (threadNarrow) thread.composer.focus();
+    else composer.focus();
   } else if (key.ctrl && key.name === "d") {
     key.preventDefault();
     switchSidebar(!showDMs);
@@ -1127,12 +1223,13 @@ renderer.keyInput.on("keypress", key => {
     menu.focus();
   } else if (key.ctrl && key.name === "r") {
     key.preventDefault();
-    if (selected) void load(selected);
+    if (thread.open) void thread.refresh();
+    if (selected && !thread.composer.focused) void load(selected);
     void refreshUnread();
     void refreshPresence();
   } else if (!composerExpanded && (key.name === "pageup" || key.name === "pagedown")) {
     key.preventDefault();
-    scroll.scrollBy(key.name === "pageup" ? -10 : 10);
+    (thread.composer.focused ? thread.scroll : scroll).scrollBy(key.name === "pageup" ? -10 : 10);
   }
 });
 menu.focus();
@@ -1152,6 +1249,7 @@ try {
           title.content = ` slack-tui · ${identity.team} · ${identity.user} · ${state === "live" ? "LIVE" : state}`;
           if (state === "live") {
             scheduleLiveResync();
+            if (thread.open) void thread.refresh();
             void refreshUnread();
           } else if (state === "offline") {
             report("Live connection offline. Check Socket Mode/app token; Ctrl+R still works.");

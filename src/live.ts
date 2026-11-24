@@ -48,6 +48,7 @@ export type LiveEvent = {
   type: string; channel?: string; subtype?: string; ts?: string; user?: string;
   text?: string; thread_ts?: string; hidden?: boolean; deleted_ts?: string;
   message?: Message & { thread_ts?: string };
+  previous_message?: Message;
   item?: { type?: string; channel?: string; ts?: string };
   reaction?: string;
 };
@@ -75,7 +76,14 @@ export function applyLiveEvent(messages: Message[], event: LiveEvent): Message[]
     if (!event.message) return messages;
     return messages.map(message => message.ts === event.message!.ts ? { ...message, ...event.message } : message);
   }
-  if (!isNewMessage(event)) return messages;
+  if (!isNewMessage(event)) {
+    if (event.thread_ts && event.ts && !event.hidden) {
+      return messages.map(message => message.ts === event.thread_ts
+        && (!message.latest_reply || laterTimestamp(message.latest_reply, event.ts) !== message.latest_reply)
+        ? { ...message, reply_count: (message.reply_count ?? 0) + 1, latest_reply: event.ts } : message);
+    }
+    return messages;
+  }
   const incoming = event as Message;
   const existing = messages.findIndex(message => message.ts === incoming.ts);
   if (existing >= 0) return messages.map((message, index) => index === existing ? { ...message, ...incoming } : message);

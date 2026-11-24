@@ -24,7 +24,7 @@ export type Message = {
   ts: string; text?: string; user?: string; bot_id?: string;
   username?: string; icons?: { image_48?: string };
   bot_profile?: { name?: string; icons?: { image_48?: string; image_72?: string } };
-  reply_count?: number; files?: MessageFile[];
+  reply_count?: number; thread_ts?: string; latest_reply?: string; files?: MessageFile[];
   blocks?: ImageBlock[];
   reactions?: { name: string; count: number; users?: string[] }[];
   attachments?: {
@@ -43,10 +43,11 @@ export interface Chat {
   channels(): Promise<Channel[]>;
   conversation(id: string): Promise<Channel>;
   history(channel: string): Promise<Message[]>;
+  replies(channel: string, ts: string): Promise<Message[]>;
   unread(channel: string, locallyRead?: string): Promise<boolean | undefined>;
   markRead(channel: string, ts: string): Promise<void>;
   presence(user: string): Promise<Presence | undefined>;
-  send(channel: string, text: string, image?: ImageAttachment): Promise<Message>;
+  send(channel: string, text: string, image?: ImageAttachment, threadTs?: string): Promise<Message>;
   edit(channel: string, ts: string, text: string): Promise<void>;
   setReaction(channel: string, ts: string, name: string, add: boolean): Promise<void>;
   readImage(image: MessageImage): Promise<Uint8Array>;
@@ -187,7 +188,10 @@ export class Slack implements Chat {
     });
     return messages.length > 0;
   }
-  async send(channel: string, text: string, image?: ImageAttachment): Promise<Message> {
+  async replies(channel: string, ts: string): Promise<Message[]> {
+    return this.pages<Message>("conversations.replies", "messages", { channel, ts });
+  }
+  async send(channel: string, text: string, image?: ImageAttachment, threadTs?: string): Promise<Message> {
     if (image) {
       const upload = await this.call<{ upload_url: string; file_id: string }>("files.getUploadURLExternal", {
         filename: image.filename, length: image.bytes.byteLength,
@@ -203,11 +207,12 @@ export class Slack implements Chat {
       await this.call("files.completeUploadExternal", {
         files: [{ id: upload.file_id, title: image.filename }],
         channel_id: channel, ...(text ? { initial_comment: text } : {}),
+        ...(threadTs ? { thread_ts: threadTs } : {}),
       });
       // Optimistic display only; a refresh replaces this with Slack's message.
-      return { ts: String(Date.now() / 1000), user: this.userId, text, files: [{ name: image.filename, mimetype: image.mimeType, previewBytes: image.bytes }] };
+      return { ts: String(Date.now() / 1000), user: this.userId, text, thread_ts: threadTs, files: [{ name: image.filename, mimetype: image.mimeType, previewBytes: image.bytes }] };
     }
-    const data = await this.call<{ message: Message }>("chat.postMessage", { channel, text });
+    const data = await this.call<{ message: Message }>("chat.postMessage", { channel, text, ...(threadTs ? { thread_ts: threadTs } : {}) });
     return data.message;
   }
   async edit(channel: string, ts: string, text: string) {
@@ -319,7 +324,9 @@ export class Demo implements Chat {
   avatars = new Map<string, string>();
   private messages = new Map<string, Message[]>([
     ["general", [
-      { ts: "1769913600", user: "alice", text: "Welcome to slack-tui! Channels on the left, messages on the right." },
+      { ts: "1769913600", user: "alice", text: "Welcome to slack-tui! Channels on the left, messages on the right.", reply_count: 2, latest_reply: "1769913720" },
+      { ts: "1769913660", thread_ts: "1769913600", user: "you", text: "Threads keep the channel tidy." },
+      { ts: "1769913720", thread_ts: "1769913600", user: "alice", text: "Try replying here! Your channel draft stays separate." },
       { ts: "1770000060", user: "alice", text: "Tab switches panes. Enter opens a channel or sends a message.\nCtrl+R refreshes. Page Up/Down scrolls." },
       { ts: "1770000120", user: "you", text: "This is an offline demo. Messages stay in memory; nothing goes to Slack." },
     ]],
@@ -339,7 +346,10 @@ export class Demo implements Chat {
   async connect() { return { team: "Offline demo", user: "You", team_id: "demo", user_id: "you" }; }
   async channels() { return [{ id: "general", name: "general" }, { id: "dev", name: "dev" }, { id: "dm", is_im: true, user: "alice" }]; }
   async conversation(id: string): Promise<Channel> { return (await this.channels()).find(channel => channel.id === id) ?? { id }; }
-  async history(channel: string) { return [...(this.messages.get(channel) ?? [])]; }
+  async history(channel: string) { return structuredClone((this.messages.get(channel) ?? []).filter(message => !message.thread_ts || message.thread_ts === message.ts)); }
+  async replies(channel: string, ts: string) {
+    return structuredClone((this.messages.get(channel) ?? []).filter(message => message.ts === ts || message.thread_ts === ts));
+  }
   async setReaction(channel: string, ts: string, name: string, add: boolean) {
     const message = this.messages.get(channel)?.find(message => message.ts === ts);
     if (!message) throw new Error("Message not found.");
@@ -356,8 +366,14 @@ export class Demo implements Chat {
     const latest = this.messages.get(channel)?.at(-1)?.ts;
     return !!latest && (!locallyRead || laterTimestamp(locallyRead, latest) !== locallyRead);
   }
-  async send(channel: string, text: string, image?: ImageAttachment) {
-    const message = { ts: String(Date.now() / 1000), user: "you", text, ...(image ? { files: [{ name: image.filename, mimetype: image.mimeType, previewBytes: image.bytes }] } : {}) };
+  async send(channel: string, text: string, image?: ImageAttachment, threadTs?: string) {
+    const message = { ts: String(Date.now() / 1000), user: "you", text, thread_ts: threadTs, ...(image ? { files: [{ name: image.filename, mimetype: image.mimeType, previewBytes: image.bytes }] } : {}) };
+    if (threadTs) {
+      const parent = this.messages.get(channel)?.find(message => message.ts === threadTs);
+      if (!parent) throw new Error("Thread not found.");
+      parent.reply_count = (parent.reply_count ?? 0) + 1;
+      parent.latest_reply = message.ts;
+    }
     this.messages.set(channel, [...(this.messages.get(channel) ?? []), message]);
     return message;
   }

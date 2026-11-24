@@ -51,7 +51,7 @@ test("thread replies do not masquerade as top-level messages and reactions are i
   const initial = [{ ts: "1", text: "Hello" }];
   const reply = { type: "message", ts: "2", thread_ts: "1", text: "Thread reply" };
   expect(isNewMessage(reply)).toBe(false);
-  expect(applyLiveEvent(initial, reply)).toEqual(initial);
+  expect(applyLiveEvent(initial, reply)).toEqual([{ ...initial[0], reply_count: 1, latest_reply: "2" }]);
   const reaction = { type: "reaction_added", user: "U1", reaction: "heart", item: { type: "message", ts: "1" } };
   let messages = applyLiveEvent(initial, reaction);
   messages = applyLiveEvent(messages, reaction);

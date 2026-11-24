@@ -4,6 +4,53 @@ import { Slack, displayText, messageText, channelName, compactName, isSidebarAct
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
+test("thread image uploads include the parent timestamp when completing the upload", async () => {
+  let completed = false;
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("files.getUploadURLExternal")) {
+      return Response.json({ ok: true, upload_url: "https://files.slack.com/upload/test", file_id: "F1" });
+    }
+    if (url.hostname === "files.slack.com") {
+      expect((init?.headers as Record<string, string>).Authorization).toBeUndefined();
+      return new Response("ok");
+    }
+    expect(url.pathname).toBe("/api/files.completeUploadExternal");
+    const form = new URLSearchParams(String(init?.body));
+    expect(form.get("thread_ts")).toBe("1.000001");
+    expect(form.get("channel_id")).toBe("C1");
+    expect(form.get("initial_comment")).toBe("caption");
+    completed = true;
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  const slack = new Slack("test");
+  const message = await slack.send("C1", "caption", { bytes: new Uint8Array([1]), filename: "test.png", mimeType: "image/png" }, "1.000001");
+  expect(completed).toBe(true);
+  expect(message.thread_ts).toBe("1.000001");
+});
+
+test("thread history paginates and replies send the parent timestamp without broadcasting", async () => {
+  let calls = 0;
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("conversations.replies")) {
+      expect(url.searchParams.get("channel")).toBe("C1");
+      expect(url.searchParams.get("ts")).toBe("1.000001");
+      calls++;
+      if (calls === 1) return Response.json({ ok: true, messages: [{ ts: "1.000001" }], response_metadata: { next_cursor: "next" } });
+      expect(url.searchParams.get("cursor")).toBe("next");
+      return Response.json({ ok: true, messages: [{ ts: "2.000001", thread_ts: "1.000001" }] });
+    }
+    expect(url.pathname).toBe("/api/chat.postMessage");
+    const body = JSON.parse(String(init?.body));
+    expect(body).toEqual({ channel: "C1", text: "reply", thread_ts: "1.000001" });
+    return Response.json({ ok: true, message: { ts: "3.000001", ...body } });
+  }) as typeof fetch;
+  const slack = new Slack("test");
+  expect(await slack.replies("C1", "1.000001")).toHaveLength(2);
+  expect((await slack.send("C1", "reply", undefined, "1.000001")).thread_ts).toBe("1.000001");
+});
+
 test("presence queries the DM participant and preserves active, away and unknown states", async () => {
   const states = ["active", "away", "unexpected"];
   globalThis.fetch = (async (input: unknown, init?: RequestInit) => {

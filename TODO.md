@@ -11,6 +11,7 @@ Keep this list updated as ideas come up and work is completed. Check off finishe
 
 ## Completed
 
+- [x] Threads: resizable side panel, narrow-terminal view, live replies, independent drafts, mentions, attachments, reactions and editing.
 - [x] Round avatar corners with a transparent image mask and a 25% corner radius.
 - [x] Make setup a single guided flow including Socket Mode by default, with `--no-socket` to skip it and `--socket` to repair an existing connection.
 - [x] At-mentions in compose, with searchable names, colored labels, and Slack user IDs preserved in drafts and sends.
