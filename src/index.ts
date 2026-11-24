@@ -401,7 +401,7 @@ function updateFooter() {
   else if (composer.focused) {
     footer.content = ` Enter: send · Shift+Enter: newline · ${composerExpanded ? "Esc: collapse" : "Ctrl+V: paste"} · Tab: sidebar · F1: help`;
   } else {
-    footer.content = " /: search · ↑↓: choose · Enter: open · Ctrl+D: DMs · Ctrl+L: active/all · Tab: write · F1: help";
+    footer.content = " /: search · ↑↓: choose · Enter/Space: open · Ctrl+D: DMs · Ctrl+L: active/all · Tab: write · F1: help";
   }
 }
 for (const pane of [menu, search, composer, editText, settingsScreen, help.screen]) pane.on("focused", updateFooter);
@@ -869,7 +869,10 @@ renderer.keyInput.on("keypress", key => {
     else if (["space", "return", "enter"].includes(key.name)) void toggleProfilePhotos();
     return;
   }
-  if (menu.focused && key.sequence === "/") {
+  if (menu.focused && key.name === "space" && !key.ctrl && !key.meta && !key.super && !key.hyper) {
+    key.preventDefault();
+    menu.selectCurrent();
+  } else if (menu.focused && key.sequence === "/") {
     key.preventDefault();
     search.focus();
   } else if ((search.focused || (menu.focused && search.value)) && key.name === "escape") {

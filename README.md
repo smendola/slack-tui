@@ -81,7 +81,7 @@ are preserved. The demo does not load or migrate credentials.
 
 | Key / gesture | Action |
 | --- | --- |
-| Up / Down, then Enter | Choose and open a conversation |
+| Up / Down, then Enter or Space | Choose and open a conversation in the sidebar |
 | Click a conversation | Open it |
 | Click **Channels** or **DMs**, or press Ctrl+D | Switch between channels/group DMs and 1:1 DMs |
 | Ctrl+L | Toggle active-only / all conversations |
