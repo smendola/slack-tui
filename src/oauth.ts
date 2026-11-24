@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { setupCommand } from "./commands";
 
 export type Manifest = {
   display_information: { name: string };
@@ -151,7 +152,7 @@ export function tokenProvider(initial: Credentials, path: string) {
   let refreshing: Promise<string> | undefined;
   return async () => {
     if (!current.expiresAt || current.expiresAt > Date.now() + 60_000) return current.token;
-    if (!current.clientId || !current.refreshToken) throw new Error("Slack token expired. Update the saved token or run bun run setup --new-app to create another Slack app.");
+    if (!current.clientId || !current.refreshToken) throw new Error(`Slack token expired. Update the saved token or run ${setupCommand} --new-app to create another Slack app.`);
     if (!refreshing) {
       refreshing = (async () => {
         const data = await slackRequest<TokenResponse>("oauth.v2.access", {

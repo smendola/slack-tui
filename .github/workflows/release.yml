@@ -1,0 +1,39 @@
+# OC:x13-cachy:sal:ses_df1a0a3d0ffezEfNl4eWrA0klm Created
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-24.04-arm, macos-15-intel, macos-15]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
+      - run: bun install --frozen-lockfile
+      - run: bun run check && bun test
+      - run: sh scripts/build-release.sh
+      - run: sh scripts/test-install.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.runner }}
+          path: dist/*
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

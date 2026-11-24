@@ -1,5 +1,7 @@
+// Agent sessions: OC:x13-cachy:sal:ses_df1a0a3d0ffezEfNl4eWrA0klm Edited
 // Agent sessions: OC:x13-cachy:sal:ses_df1c1ceedffe0p5mflr3l2vNvR Edited
 import { spawn } from "node:child_process";
+import { setupCommand, startCommand } from "./commands";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { configDirectory, credentialsPath } from "./config-paths";
@@ -101,17 +103,17 @@ async function setupSocket(credentials: Credentials, signal: AbortSignal, config
   // Re-read so a concurrent user-token refresh is not overwritten by stale credentials.
   const latest = await loadCredentials({ ignoreInvalidAppToken: true });
   if (!latest || latest.clientId !== credentials.clientId || latest.appId !== credentials.appId) {
-    throw new Error("The saved Slack connection changed during setup. Run bun run setup --socket again.");
+    throw new Error(`The saved Slack connection changed during setup. Run ${setupCommand} --socket again.`);
   }
   await saveUserToken(credentialsPath, latest.token, { ...latest, appToken });
   console.log(`Live connection verified. Saved app-level token to ${credentialsPath} (owner-only permissions).`);
 }
 
-async function setup() {
-  const options = setupOptions(process.argv.slice(2));
+export async function setup(args: string[]) {
+  const options = setupOptions(args);
   if (options.help) {
-    console.log(`bun run setup [--new-app] [--no-socket]
-bun run setup --socket
+    console.log(`${setupCommand} [--new-app] [--no-socket]
+${setupCommand} --socket
 
 Default: use the saved connection or create an app on first setup.
 If user authorization is saved but Socket Mode is missing, setup resumes the live-events step.
@@ -125,7 +127,7 @@ Creating an app requires a Slack app configuration access token and a browser on
   const existing = options.newApp ? undefined : await loadCredentials({ ignoreInvalidAppToken: options.socket });
   const action = setupAction(options, existing);
   if (action === "ready") {
-    console.log("Slack is already configured. Run bun start, bun run setup --socket to repair live events, or bun run setup --new-app to create another app.");
+    console.log(`Slack is already configured. Run ${startCommand}, ${setupCommand} --socket to repair live events, or ${setupCommand} --new-app to create another app.`);
     return;
   }
   const controller = new AbortController();
@@ -139,14 +141,14 @@ Creating an app requires a Slack app configuration access token and a browser on
   try {
     if (action === "socket") {
       await setupSocket(existing!, signal);
-      console.log("Setup complete. Run bun start (or restart slack-tui) and look for LIVE in the title.");
+      console.log(`Setup complete. Run ${startCommand} and look for LIVE in the title.`);
       return;
     }
     if (options.newApp) {
       console.log("This creates another Slack app. Your existing app will remain in the workspace. Only the local connection changes after authorization.");
     } else {
       const pending = await pendingApp();
-      if (pending !== undefined) throw new Error(`A previous setup created a Slack app but did not finish. Open https://api.slack.com/apps/${encodeURIComponent(pending)}/oauth and follow the README's manual setup steps, or run bun run setup --new-app to create another app.`);
+      if (pending !== undefined) throw new Error(`A previous setup created a Slack app but did not finish. Open https://api.slack.com/apps/${encodeURIComponent(pending)}/oauth and follow the README's manual setup steps, or run ${setupCommand} --new-app to create another app.`);
     }
     console.log("This wizard will create the Slack app for you. Do not click Create New App.");
     console.log("Run this command on the same machine as your browser. Setup uses a local OAuth callback.");
@@ -191,12 +193,12 @@ Creating an app requires a Slack app configuration access token and a browser on
     if (!options.noSocket) {
       try { await setupSocket(credentials, signal, true); }
       catch (error) {
-        console.log("User authorization is saved. Run bun run setup again to finish live events without creating another app.");
+        console.log(`User authorization is saved. Run ${setupCommand} again to finish live events without creating another app.`);
         throw error;
       }
-      console.log("Setup complete. Run bun start and look for LIVE in the title.");
+      console.log(`Setup complete. Run ${startCommand} and look for LIVE in the title.`);
     } else {
-      console.log("Setup complete; Socket Mode was skipped. Run bun start. Run bun run setup later to add live events.");
+      console.log(`Setup complete; Socket Mode was skipped. Run ${startCommand}. Run ${setupCommand} later to add live events.`);
     }
   } finally {
     process.off("SIGINT", cancel);
@@ -204,12 +206,12 @@ Creating an app requires a Slack app configuration access token and a browser on
     await callback?.stop();
     if (app?.app_id && !saved) {
       console.log(`App ${app.app_id} was created but setup did not finish. Existing credentials were not changed.`);
-      console.log(`Install it manually at https://api.slack.com/apps/${app.app_id}/oauth or run bun run setup --new-app to create another app.`);
+      console.log(`Install it manually at https://api.slack.com/apps/${app.app_id}/oauth or run ${setupCommand} --new-app to create another app.`);
     }
   }
 }
 
-await setup().catch(error => {
+if (import.meta.main) await setup(process.argv.slice(2)).catch(error => {
   console.error(error instanceof Error ? error.message : "Setup failed.");
   process.exitCode = 1;
 });

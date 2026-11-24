@@ -1,3 +1,4 @@
+<!-- OC:x13-cachy:sal:ses_df1a0a3d0ffezEfNl4eWrA0klm Edited -->
 # slack-tui
 
 A Slack chat client for your terminal, written in TypeScript with
@@ -10,12 +11,39 @@ Threads open alongside the channel, with live replies and independent drafts.
 
 ## Getting started
 
+On Linux (glibc) or macOS, Intel x64 or ARM64, install the latest GitHub Release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/smendola/slack-tui/main/install.sh | sh
+```
+
+Prefer to read the installer first? Download, inspect, then run that same file:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/smendola/slack-tui/main/install.sh -o install.sh
+less install.sh
+sh install.sh
+```
+
+Run **`slack-tui`** (or `~/.local/bin/slack-tui` if needed). On first launch it
+opens the workspace setup wizard described below, then starts chat. For an offline
+preview instead, run **`slack-tui --demo`**.
+
+The installer checks the archive against the release's SHA-256 checksum, stores
+the app and its bundled runtime in `~/.local/lib/slack-tui`, and links the
+launcher into `~/.local/bin`. It needs no sudo, shell profile changes, Bun install,
+or Slack credentials. Rerun it to update. To uninstall, remove the launcher and
+`~/.local/lib/slack-tui`; credentials and settings are stored separately.
+
+### Running from source
+
 Install Bun, then:
 
 ```sh
 git clone https://github.com/smendola/slack-tui.git
 cd slack-tui
 bun install
+bun start
 ```
 
 Try the offline demo:
@@ -25,6 +53,9 @@ bun run demo
 ```
 
 The demo uses in-memory conversations and never calls Slack.
+
+In the instructions below, installed users can substitute `slack-tui setup`
+for `bun run setup` and `slack-tui` for `bun start`.
 
 ## Connect to Slack
 
@@ -237,6 +268,11 @@ posting a duplicate.
 bun run check
 bun test
 ```
+
+To build the native release archive for your current platform, run
+`sh scripts/build-release.sh`. The archive and checksum are written to `dist/`.
+Pushing a `v*` version tag runs the native builds on GitHub Actions and publishes
+all four archives and checksums together. The installer requires a published release.
 
 ## License
 

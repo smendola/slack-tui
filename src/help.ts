@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { credentialsPath, settingsPath } from "./config-paths";
+import { setupCommand } from "./commands";
 import { button } from "./button";
 
 function fileLink(path: string, label = path) {
@@ -45,7 +46,7 @@ const guide = `## Navigation
 - **Bold conversation names** mean unread messages. Opening or refreshing a conversation marks it read in Slack through the newest loaded message. If that fails, check the status line and retry with **Ctrl+R**.
 - In DMs, green **●** means active, **○** away, and **·** unknown. Presence is checked gradually at startup, when switching to DMs, and with **Ctrl+R**; it is not a live subscription.
 - **LIVE** in the title means Socket Mode is connected. Messages, edits, deletions, reactions, and unread indicators update automatically. Unread catch-up also runs at startup and with **Ctrl+R**.
-- \`bun run setup\` includes live events. Use \`--socket\` to repair an existing connection or \`--no-socket\` to skip live setup.
+- \`${setupCommand}\` includes live events. Use \`--socket\` to repair an existing connection or \`--no-socket\` to skip live setup.
 
 ## Files and storage
 

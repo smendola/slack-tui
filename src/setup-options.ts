@@ -1,5 +1,6 @@
 // Agent sessions: OC:x13-cachy:sal:ses_df1c1ceedffe0p5mflr3l2vNvR Edited
 import type { Credentials, Manifest } from "./oauth";
+import { setupCommand } from "./commands";
 
 export type SetupOptions = { help: boolean; newApp: boolean; socket: boolean; noSocket: boolean };
 
@@ -11,7 +12,7 @@ export function setupOptions(args: string[]): SetupOptions {
   if (options.help) return options;
   if (args.includes("--replace")) throw new Error("--replace was renamed to --new-app. This creates another Slack app; any existing app remains in the workspace.");
   if (args.some(arg => !["--new-app", "--socket", "--no-socket"].includes(arg))) {
-    throw new Error("Unknown option. Run bun run setup --help.");
+    throw new Error(`Unknown option. Run ${setupCommand} --help.`);
   }
   if (options.socket && (options.noSocket || options.newApp)) {
     throw new Error("--socket cannot be combined with --no-socket or --new-app.");
@@ -21,7 +22,7 @@ export function setupOptions(args: string[]): SetupOptions {
 
 export function setupAction(options: SetupOptions, existing?: Credentials) {
   if (options.socket) {
-    if (!existing) throw new Error("Run bun run setup first to connect your Slack user.");
+    if (!existing) throw new Error(`Run ${setupCommand} first to connect your Slack user.`);
     return "socket";
   }
   if (existing && !options.newApp) return !options.noSocket && !existing.appToken ? "socket" : "ready";

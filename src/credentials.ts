@@ -2,6 +2,7 @@ import { readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { credentialsPath } from "./config-paths";
+import { setupCommand } from "./commands";
 import { isUserToken, isAppToken, saveUserToken, type Credentials } from "./oauth";
 
 const legacyPath = fileURLToPath(new URL("../.env", import.meta.url));
@@ -11,12 +12,12 @@ const assignment = /^\s*(?:export\s+)?([A-Z_]+)\s*=\s*(.*?)\s*$/;
 function fromValues(values: Record<string, string | undefined>, ignoreInvalidAppToken = false): Credentials | undefined {
   const token = values.SLACK_USER_TOKEN;
   if (!token) return undefined;
-  if (!isUserToken(token)) throw new Error("Invalid Slack user token. Update the saved token or run bun run setup --new-app to create another Slack app.");
+  if (!isUserToken(token)) throw new Error(`Invalid Slack user token. Update the saved token or run ${setupCommand} --new-app to create another Slack app.`);
   const expiresAt = values.SLACK_TOKEN_EXPIRES_AT ? Number(values.SLACK_TOKEN_EXPIRES_AT) : undefined;
   if (expiresAt !== undefined && (!Number.isFinite(expiresAt) || expiresAt <= 0)) throw new Error("Invalid Slack token expiry in credentials.");
   let appToken = values.SLACK_APP_TOKEN || undefined;
   if (appToken && !isAppToken(appToken)) {
-    if (!ignoreInvalidAppToken) throw new Error("Invalid Slack app token. Run bun run setup --socket.");
+    if (!ignoreInvalidAppToken) throw new Error(`Invalid Slack app token. Run ${setupCommand} --socket.`);
     appToken = undefined;
   }
   const appId = values.SLACK_APP_ID || undefined;
@@ -53,7 +54,7 @@ export async function loadCredentials(options: {
   const stored = await readOptional(path);
   if (stored !== undefined) {
     const parsed = parseCredentialsFile(stored, options.ignoreInvalidAppToken);
-    if (!parsed) throw new Error(`No Slack user token in ${path}. Restore the token or run bun run setup --new-app to create another Slack app.`);
+    if (!parsed) throw new Error(`No Slack user token in ${path}. Restore the token or run ${setupCommand} --new-app to create another Slack app.`);
     return parsed;
   }
   const oldContents = await readOptional(legacy);

@@ -1,3 +1,4 @@
+// Agent sessions: OC:x13-cachy:sal:ses_df1a0a3d0ffezEfNl4eWrA0klm Edited
 // Agent sessions: OC:x13-cachy:sal:ses_df1c1ceedffe0p5mflr3l2vNvR Edited
 // Agent sessions: OC:x13-cachy:sal:ses_df58f4884ffeQ73n6oD4HRDj22 Edited
 import {
@@ -10,6 +11,7 @@ import { Slack, Demo, channelName, displayText, isSidebarActive, laterTimestamp,
 import { ChannelSelect } from "./channel-select";
 import { tokenProvider } from "./oauth";
 import { credentialsPath } from "./config-paths";
+import { setupCommand, demoCommand } from "./commands";
 import { loadCredentials } from "./credentials";
 import { clipboardImage, MAX_IMAGE_BYTES, type ImageAttachment } from "./attachment";
 import { AvatarCache } from "./avatars";
@@ -35,12 +37,21 @@ let settings: Settings = await loadSettings().catch(error => {
   settingsLoadError = `Could not load settings: ${String(error)}`;
   return { ...defaultSettings };
 });
-const credentials = demo ? undefined : await loadCredentials().catch(error => {
+const credentials = demo ? undefined : await (async () => {
+  const saved = await loadCredentials();
+  if (saved) return saved;
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error(`Run ${setupCommand} in an interactive terminal to connect Slack.`);
+  }
+  const { setup } = await import("./setup");
+  await setup([]);
+  return await loadCredentials();
+})().catch(error => {
   console.error(error instanceof Error ? error.message : "Unable to load credentials.");
   process.exit(1);
 });
 if (!demo && !credentials) {
-  console.error(`Run bun run setup to connect Slack.\nCredentials are stored in ${credentialsPath}.\nOr try: bun run demo`);
+  console.error(`Run ${setupCommand} to connect Slack.\nCredentials are stored in ${credentialsPath}.\nOr try: ${demoCommand}`);
   process.exit(1);
 }
 const chat = demo ? new Demo() : new Slack(tokenProvider(credentials!, credentialsPath));
@@ -1070,7 +1081,7 @@ async function load(channel: Channel) {
     readLocally(channel, currentMessages);
     renderMessages();
     scroll.scrollTo(Infinity);
-    report(`${currentMessages.length} recent messages · ${live ? "Live events enabled" : "Ctrl+R to refresh · bun run setup to finish live setup"}`);
+    report(`${currentMessages.length} recent messages · ${live ? "Live events enabled" : `Ctrl+R to refresh · ${setupCommand} to finish live setup`}`);
     try { lastOpened?.save(channel.id); }
     catch (error) { report(`Could not remember conversation: ${String(error)}`); }
     const latest = currentMessages.reduce<string | undefined>((cursor, message) => laterTimestamp(cursor, message.ts), undefined);

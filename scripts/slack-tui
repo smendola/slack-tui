@@ -1,0 +1,14 @@
+#!/bin/sh
+# OC:x13-cachy:sal:ses_df1a0a3d0ffezEfNl4eWrA0klm Created
+set -eu
+# The installer creates an absolute symlink to this launcher.
+self=$0
+if [ -L "$self" ]; then self=$(readlink "$self"); fi
+root=$(CDPATH= cd -P "$(dirname "$self")" && pwd)
+export SLACK_TUI_INSTALLED=1
+case ${1-} in
+  setup) shift; exec "$root/bun" --no-env-file "$root/src/setup.ts" "$@" ;;
+  --demo|'') exec "$root/bun" --no-env-file "$root/src/index.ts" "$@" ;;
+  --help|-h) echo 'Usage: slack-tui [--demo | setup [--help]]' ;;
+  *) echo 'Unknown command. Run slack-tui --help.' >&2; exit 1 ;;
+esac
