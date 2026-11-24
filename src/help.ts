@@ -59,7 +59,7 @@ export function createHelpScreen(context: RenderContext, close: () => void) {
       "If that update fails, the status line explains why; Ctrl+R retries.",
       "DM indicators: green ● = active, ○ = away, · = unknown.",
       "Socket Mode pushes new messages, edits and reactions, and updates unread indicators. The title shows LIVE when connected.",
-      "Without Socket Mode, refresh with Ctrl+R. Configure it with bun run setup --socket.",
+      "bun run setup includes live events. Use --socket to repair an existing connection, or --no-socket to skip live setup.",
       "Unread catch-up and presence checks run gradually at startup and with Ctrl+R.",
       "Switching to DMs also checks presence. These are snapshots, not live updates.",
       "The active-only sidebar hides conversations Slack marks dormant and explicitly closed DMs; it is not an online-user filter.",

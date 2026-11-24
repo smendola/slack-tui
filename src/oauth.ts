@@ -8,7 +8,7 @@ export type Manifest = {
   settings?: Record<string, unknown>;
 };
 export type App = { app_id: string; credentials: { client_id: string } };
-export type Credentials = { token: string; clientId?: string; refreshToken?: string; expiresAt?: number; appToken?: string };
+export type Credentials = { token: string; clientId?: string; refreshToken?: string; expiresAt?: number; appToken?: string; appId?: string };
 type TokenResponse = { access_token?: string; token_type?: string; scope?: string; refresh_token?: string; expires_in?: number };
 export const isUserToken = (token: string) => /^(?:xoxp-|xoxe\.xoxp-)[A-Za-z0-9-]+$/.test(token);
 export const isAppToken = (token: string) => /^xapp-[A-Za-z0-9-]+$/.test(token);
@@ -104,6 +104,7 @@ export function updateEnv(contents: string, token: string, credentials?: Credent
   const values: Record<string, string | undefined> = {
     SLACK_USER_TOKEN: token,
     ...(credentials?.appToken !== undefined ? { SLACK_APP_TOKEN: credentials.appToken } : {}),
+    ...(credentials?.appId !== undefined ? { SLACK_APP_ID: credentials.appId } : {}),
     ...(credentials ? {
       SLACK_CLIENT_ID: credentials.clientId,
       SLACK_REFRESH_TOKEN: credentials.refreshToken,

@@ -3,7 +3,7 @@
 A Slack chat client for your terminal, written in TypeScript with
 [Bun](https://bun.sh) and [OpenTUI](https://github.com/anomalyco/opentui).
 
-Browse channels and DMs, send messages as yourself, and paste images with captions.
+Browse channels and DMs, receive live updates, send messages as yourself, and paste images with captions.
 The interface includes user avatars, a draggable pane split, and an expandable
 multiline composer.
 
@@ -29,6 +29,8 @@ The demo uses in-memory conversations and never calls Slack.
 
 Each workspace uses its own Slack app registration. The setup wizard creates
 that app for you; your workspace may require administrator approval.
+One wizard authorizes your Slack user and connects live events using an
+app-level token.
 
 Run setup on the same machine as your browser:
 
@@ -44,22 +46,44 @@ bun run setup
 4. The wizard creates the app and opens Slack's authorization page. Approve
    the requested permissions.
 5. Your user token is verified and saved to
-   `~/.config/slack-tui/credentials.env`. Start chatting:
+   `~/.config/slack-tui/credentials.env`.
+6. The wizard opens the new app's settings and asks for an app-level token.
+   Under **Basic Information → App-Level Tokens**, generate a token with the
+   **`connections:write`** scope.
+7. Paste that `xapp-…` token into the wizard's masked prompt. Socket Mode and
+   event subscriptions are already enabled; the wizard verifies the WebSocket
+   connection and saves the token.
+8. Start chatting:
 
    ```sh
    bun start
    ```
 
+   The title shows **LIVE** once connected. New messages arrive automatically.
+
 Setup uses OAuth with PKCE and a temporary localhost callback. The configuration
 token is not saved. Credentials are written with owner-only permissions outside
 the project directory. `XDG_CONFIG_HOME` overrides the default `~/.config` directory.
 If Slack issues expiring credentials, the client saves and refreshes them automatically.
-If authorization expires and refresh is no longer possible, run setup again.
+If authorization expires and refresh is no longer possible, reconnect with
+`bun run setup --replace`.
 
-To replace an existing connection, use `bun run setup --replace`. Each setup run
-creates a new app. If setup is interrupted after app creation, it prints the
-app's settings URL so you can finish installation manually or delete it before
-retrying. Existing credentials are replaced only after successful authorization.
+### Setup options and recovery
+
+- **`bun run setup`** — complete setup, including live events. If user
+  authorization is already saved but the app-level token is missing, it resumes
+  the live-events step without creating another app.
+- **`bun run setup --no-socket`** — skip Socket Mode setup. It can also be
+  combined with `--replace`. It does not remove an already-configured app-level token.
+- **`bun run setup --socket`** — add or repair live events for the existing
+  connection without creating an app.
+- **`bun run setup --replace`** — create and authorize a new app, including
+  Socket Mode setup by default.
+
+User credentials are saved after successful authorization. If the live-events
+step is interrupted, rerun `bun run setup` to finish it. If setup stops before
+user authorization is saved, it prints the new app's settings URL so you can
+finish installation manually or delete it before retrying.
 
 ### Manual setup
 
@@ -71,7 +95,10 @@ retrying. Existing credentials are replaced only after successful authorization.
 5. Create `~/.config/slack-tui/credentials.env` (or
    `$XDG_CONFIG_HOME/slack-tui/credentials.env`) using `.env.example` as a template,
    replace the placeholder with your token, and restrict permissions with `chmod 600`.
-6. Run `bun start`.
+6. Generate an app-level token with `connections:write` under **Basic Information
+   → App-Level Tokens**, then run `bun run setup --socket` and paste it into the
+   masked prompt. The manifest already enables Socket Mode and its event subscriptions.
+7. Run `bun start` and check for **LIVE** in the title.
 
 Existing project-local `.env` credentials migrate automatically on startup.
 Only Slack credential entries are removed from the old file; unrelated settings
@@ -79,46 +106,8 @@ are preserved. The demo does not load or migrate credentials.
 
 ## Controls
 
-| Key / gesture | Action |
-| --- | --- |
-| Up / Down, then Enter or Space | Choose and open a conversation in the sidebar |
-| Click a conversation | Open it |
-| Click **Channels** or **DMs**, or press Ctrl+D | Switch between channels/group DMs and 1:1 DMs |
-| Ctrl+L | Toggle active-only / all conversations |
-| Mouse wheel over sidebar | Move through conversations |
-| Drag either adjoining vertical pane border | Resize sidebar and chat |
-| Tab | Switch between sidebar and composer |
-| Enter in composer | Send message and attached image |
-| Ctrl+V in composer | Paste a clipboard image or text |
-| Ctrl+G / click Remove image | Remove the attached image |
-| Shift+Enter in composer | Expand the composer and insert a newline |
-| Double-click composer | Expand the composer |
-| Escape | Collapse the composer, keeping the draft |
-| Page Up / Page Down or mouse wheel | Scroll messages |
-| Drag over message text, then release | Select and automatically copy to clipboard |
-| Double / triple-click message text | Select and copy a word / logical line |
-| Ctrl+R | Refresh the current conversation, unread status and DM presence |
-| Ctrl+C | Quit |
-| F1 | Open / close help (Escape also closes it) |
-| F2 | Open / close settings |
-
-Shift+Enter requires a terminal that reports modified Enter keys. Double-click
-can also expand the composer. Sending collapses it unless you've edited the
-draft while the send was in progress.
-
-Press **F1** for the full in-app guide: keybindings, mouse controls, status
-indicators, resolved credential/settings paths, and image/clipboard behavior.
-Scroll with Up/Down, Page Up/Down, Home/End or the mouse wheel. Closing help
-restores the previous screen and focus without changing your draft.
-
-Message selections stay highlighted after copying. Copying uses the local
-clipboard when available, with terminal OSC 52 as a fallback. Over SSH it
-targets the terminal clipboard, which must allow OSC 52 clipboard writes.
-Selections in the composer, settings or help do not trigger automatic copying.
-
-Labeled message and bot-attachment links display as underlined, clickable labels
-instead of appending the full URL. Use your terminal's link gesture (often
-Ctrl+click) to open them; this requires OSC 8 hyperlink support.
+Keyboard and mouse navigation are supported. Press **F1** for the in-app guide
+to keybindings, mouse controls, and other features.
 
 ## Images and avatars
 
@@ -168,8 +157,21 @@ The existing `users:read` permission covers presence—no extra scopes are neede
 
 ## Live messages (Socket Mode)
 
-Slack can push messages over a WebSocket—no polling, public server or tunnel.
-To enable this on your existing Slack app:
+Slack pushes messages over a WebSocket—no polling, public server or tunnel.
+Socket Mode is part of the standard setup above.
+
+The title shows **LIVE** when connected. Messages, edits, deletions and reactions
+update automatically; other conversations become bold on incoming messages.
+Updates preserve drafts and scroll position, and wait to redraw while you select
+text, edit a message, or use another screen. Visible messages at the bottom are
+marked read. Socket Mode reconnects automatically and catches up the open
+conversation's recent history. **Ctrl+R** is available for troubleshooting and
+resyncing. Presence still uses explicit checks rather than a live subscription.
+
+### Checking an existing app's configuration
+
+If you are connecting an app that was not created from the current manifest,
+check these settings:
 
 1. Open [your Slack app settings](https://api.slack.com/apps) and select the
    **same app that issued your saved user token**.
@@ -186,19 +188,6 @@ To enable this on your existing Slack app:
 6. Run **`bun run setup --socket`** and paste the `xapp-…` token into its masked
    prompt. This adds `SLACK_APP_TOKEN` to the owner-only credentials file without
    creating another Slack app. Restart slack-tui.
-
-New apps created from the manifest already enable Socket Mode and subscribe to
-these events; they still need the app-level token.
-
-The title shows **LIVE** when connected. Messages, edits, deletions and reactions
-update automatically; other conversations become bold on incoming messages.
-Updates preserve drafts and scroll position, and wait to redraw while you select
-text, edit a message, or use another screen. Visible messages at the bottom are
-marked read. Socket Mode reconnects automatically and catches up the open
-conversation's recent history. Ctrl+R remains available for manual reconciliation.
-Presence still uses explicit checks rather than a live subscription.
-
-Without an app-level token, the client remains usable with manual refresh.
 
 ## Unread status
 
@@ -224,7 +213,6 @@ user token scope and reauthorization to add or remove reactions.
 
 ## Current limitations
 
-- **Live events need setup:** without Socket Mode, press Ctrl+R to fetch incoming messages.
 - **Recent history only:** loads up to 50 messages per conversation.
 - **Basic formatting:** resolves mentions, links and bot attachment details,
   but does not yet render styled Markdown.

@@ -40,11 +40,13 @@ test("credential parsing accepts quoted values and rejects malformed token/expir
 });
 
 test("Socket Mode credentials survive user token refresh and can be removed when replacing the app", () => {
-  const file = "SLACK_USER_TOKEN=xoxp-old\nSLACK_APP_TOKEN=xapp-example\n";
+  const file = "SLACK_USER_TOKEN=xoxp-old\nSLACK_APP_TOKEN=xapp-example\nSLACK_APP_ID=A12345\n";
   expect(parseCredentialsFile(file)?.appToken).toBe("xapp-example");
   const refreshed = updateEnv(file, "xoxp-new", { token: "xoxp-new", clientId: "1.2" });
   expect(parseCredentialsFile(refreshed)?.appToken).toBe("xapp-example");
+  expect(parseCredentialsFile(refreshed)?.appId).toBe("A12345");
   const replaced = updateEnv(refreshed, "xoxp-other", { token: "xoxp-other", appToken: "" });
   expect(parseCredentialsFile(replaced)?.appToken).toBeUndefined();
   expect(() => parseCredentialsFile("SLACK_USER_TOKEN=xoxp-test\nSLACK_APP_TOKEN=xoxb-wrong")).toThrow("Invalid Slack app token");
+  expect(parseCredentialsFile("SLACK_USER_TOKEN=xoxp-test\nSLACK_APP_TOKEN=xoxb-wrong", true)?.appToken).toBeUndefined();
 });

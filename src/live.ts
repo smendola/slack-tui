@@ -1,6 +1,49 @@
 import { SocketModeClient, LogLevel, type SocketModeOptions } from "@slack/socket-mode";
 import { laterTimestamp, updateReaction, type Message } from "./slack";
 
+function socketOptions(appToken: string): SocketModeOptions {
+  const quiet = () => {};
+  return {
+    appToken, autoReconnectEnabled: true,
+    logger: { debug: quiet, info: quiet, warn: quiet, error: quiet, setLevel: quiet, setName: quiet, getLevel: () => LogLevel.ERROR },
+    clientOptions: { retryConfig: { retries: 3 }, timeout: 20_000 },
+  };
+}
+
+/** Setup succeeds only after Slack's WebSocket hello, not just issuing a URL. */
+export async function verifySocketConnection(appToken: string, signal: AbortSignal, appId?: string,
+  createClient: (options: SocketModeOptions) => SocketModeClient = options => new SocketModeClient(options)) {
+  if (signal.aborted) throw new Error("Socket verification cancelled.");
+  const client = createClient({ ...socketOptions(appToken), autoReconnectEnabled: false });
+  let connectedApp: string | undefined;
+  client.on("ws_message", (raw: string) => {
+    try {
+      const event = JSON.parse(String(raw));
+      if (event.type === "hello") connectedApp = event.connection_info?.app_id;
+    } catch { /* The SDK handles malformed frames. */ }
+  });
+  client.on("slack_event", ({ ack }) => { void ack().catch(() => {}); });
+  const deadline = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
+  let abort!: () => void;
+  const cancelled = new Promise<never>((_, reject) => {
+    abort = () => reject(new Error("Socket verification cancelled or timed out."));
+    deadline.addEventListener("abort", abort, { once: true });
+    if (deadline.aborted) abort();
+  });
+  try {
+    await Promise.race([client.start(), cancelled]);
+    if (appId && connectedApp && appId !== connectedApp) {
+      throw new Error("That app-level token belongs to a different Slack app.");
+    }
+  } catch (error) {
+    if (error instanceof Error && /^(That app-level|Socket verification)/.test(error.message)) throw error;
+    throw new Error("Could not connect to Slack Socket Mode. Check the app-level token, connections:write scope, Socket Mode setting and network.");
+  } finally {
+    deadline.removeEventListener("abort", abort);
+    await client.disconnect();
+  }
+}
+
 export type LiveEvent = {
   type: string; channel?: string; subtype?: string; ts?: string; user?: string;
   text?: string; thread_ts?: string; hidden?: boolean; deleted_ts?: string;
@@ -45,12 +88,7 @@ export function connectLive(appToken: string, team: string, user: string, handle
 }, createClient: (options: SocketModeOptions) => SocketModeClient = options => new SocketModeClient(options)) {
   // SDK logs can contain full event payloads or connection URLs. Keep them out
   // of the terminal/transcript; surface only connection state to the UI.
-  const quiet = () => {};
-  const client = createClient({
-    appToken, autoReconnectEnabled: true,
-    logger: { debug: quiet, info: quiet, warn: quiet, error: quiet, setLevel: quiet, setName: quiet, getLevel: () => LogLevel.ERROR },
-    clientOptions: { retryConfig: { retries: 3 }, timeout: 20_000 },
-  });
+  const client = createClient(socketOptions(appToken));
   let stopped = false;
   const seen = new Set<string>();
   client.on("slack_event", ({ ack, body, type, envelope_id }) => {

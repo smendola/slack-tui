@@ -1,6 +1,39 @@
 import { expect, test } from "bun:test";
 import { SocketModeClient } from "@slack/socket-mode";
-import { applyLiveEvent, connectLive, isNewMessage, type LiveEvent } from "./live";
+import { EventEmitter } from "node:events";
+import { applyLiveEvent, connectLive, isNewMessage, verifySocketConnection, type LiveEvent } from "./live";
+
+test("setup verifies the connected app and closes the probe on success or failure", async () => {
+  const probe = new EventEmitter() as EventEmitter & { start(): Promise<object>; disconnect(): Promise<void> };
+  let disconnected = 0;
+  probe.start = async () => {
+    probe.emit("ws_message", JSON.stringify({ type: "hello", connection_info: { app_id: "A123" } }));
+    return { ok: true };
+  };
+  probe.disconnect = async () => { disconnected++; };
+  const factory = () => probe as unknown as SocketModeClient;
+  await verifySocketConnection("xapp-test", new AbortController().signal, "A123", factory);
+  expect(disconnected).toBe(1);
+  await expect(verifySocketConnection("xapp-test", new AbortController().signal, "A999", factory)).rejects.toThrow("different Slack app");
+  expect(disconnected).toBe(2);
+  probe.start = async () => { throw new Error("sensitive SDK connection detail"); };
+  await expect(verifySocketConnection("xapp-test", new AbortController().signal, undefined, factory)).rejects.toThrow("Could not connect to Slack Socket Mode");
+  expect(disconnected).toBe(3);
+});
+
+test("cancelling socket setup disconnects a pending probe", async () => {
+  const controller = new AbortController();
+  const probe = new EventEmitter() as EventEmitter & { start(): Promise<never>; disconnect(): Promise<void> };
+  let disconnected = false;
+  probe.start = () => {
+    controller.abort();
+    return new Promise<never>(() => {});
+  };
+  probe.disconnect = async () => { disconnected = true; };
+  await expect(verifySocketConnection("xapp-test", controller.signal, undefined, () => probe as unknown as SocketModeClient))
+    .rejects.toThrow("cancelled");
+  expect(disconnected).toBe(true);
+});
 
 test("pushed messages deduplicate outgoing echoes, order messages, and apply edits/deletes", () => {
   let messages = [{ ts: "100.000001", text: "First", user: "U1" }];

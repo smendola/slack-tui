@@ -886,7 +886,7 @@ async function load(channel: Channel) {
     readLocally(channel, currentMessages);
     renderMessages();
     scroll.scrollTo(Infinity);
-    report(`${currentMessages.length} recent messages · ${live ? "Live events enabled" : "Ctrl+R to refresh · bun run setup --socket for live events"}`);
+    report(`${currentMessages.length} recent messages · ${live ? "Live events enabled" : "Ctrl+R to refresh · bun run setup to finish live setup"}`);
     try { lastOpened?.save(channel.id); }
     catch (error) { report(`Could not remember conversation: ${String(error)}`); }
     const latest = currentMessages.reduce<string | undefined>((cursor, message) => laterTimestamp(cursor, message.ts), undefined);

@@ -9,6 +9,8 @@ Keep this list updated as ideas come up and work is completed. Check off finishe
 
 ## Completed
 
+- [x] Make setup a single guided flow including Socket Mode by default, with `--no-socket` to skip it and `--socket` to repair an existing connection.
+
 - [x] Receive live message/edit/reaction events through Slack Socket Mode, reconnect and catch up recent history, and preserve drafts/scroll position during updates.
 
 - [x] Show the DM participant’s name without `@` and their presence in the chat header. Show avatars in the DM list and header when profile photos are enabled.

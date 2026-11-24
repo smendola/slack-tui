@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
 import { credentialsPath } from "./config-paths";
 import { loadCredentials } from "./credentials";
-import { authorizationURL, createPKCE, exchangeUserToken, isAppToken, saveUserToken, slackRequest, startCallback, type App, type Manifest } from "./oauth";
+import { authorizationURL, createPKCE, exchangeUserToken, isAppToken, saveUserToken, slackRequest, startCallback, type App, type Credentials, type Manifest } from "./oauth";
+import { verifySocketConnection } from "./live";
+import { setupAction, setupManifest, setupOptions } from "./setup-options";
 
 const root = new URL("../", import.meta.url);
 
@@ -15,6 +17,7 @@ function openBrowser(url: string) {
 }
 
 function readSecret(signal: AbortSignal, label = "Configuration access token"): Promise<string> {
+  if (signal.aborted) throw new Error("Setup cancelled or timed out.");
   if (!process.stdin.isTTY) throw new Error("Run setup in an interactive terminal to paste the token.");
   process.stdout.write(`${label} (masked): `);
   return new Promise((resolve, reject) => {
@@ -56,35 +59,54 @@ function waitFor<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
     const abort = () => reject(new Error("Setup cancelled or timed out."));
     if (signal.aborted) { abort(); return; }
     signal.addEventListener("abort", abort, { once: true });
-    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    promise.then(
+      value => { signal.removeEventListener("abort", abort); resolve(value); },
+      error => { signal.removeEventListener("abort", abort); reject(error); },
+    );
   });
 }
 
-async function setup() {
-  if (process.argv.includes("--socket")) {
-    const credentials = await loadCredentials();
-    if (!credentials) throw new Error("Run bun run setup first to connect your Slack user.");
+async function setupSocket(credentials: Credentials, signal: AbortSignal, configured = false) {
+  const appUrl = credentials.appId ? `https://api.slack.com/apps/${credentials.appId}/general` : "https://api.slack.com/apps";
+  if (!configured) {
     console.log("Enable live events for the SAME Slack app that issued your saved user token:");
-    console.log("https://api.slack.com/apps → your app → Socket Mode → Enable Socket Mode.");
+    console.log(`${appUrl} → Socket Mode → Enable Socket Mode.`);
+    if (credentials.clientId) console.log(`Its Client ID is ${credentials.clientId}.`);
     console.log("Event Subscriptions → Enable Events → Subscribe to events on behalf of users:");
     console.log("  message.channels, message.groups, message.im, message.mpim, reaction_added, reaction_removed");
     console.log("OAuth & Permissions → User Token Scopes: add reactions:read if it is missing.");
     console.log("Save changes and reinstall/reauthorize if Slack asks.");
-    console.log("Basic Information → App-Level Tokens → Generate Token and Scopes → connections:write.");
-    const appToken = await readSecret(AbortSignal.timeout(15 * 60_000), "App-level token (xapp-)");
-    if (!isAppToken(appToken)) throw new Error("Expected an xapp- app-level token.");
-    await slackRequest("apps.connections.open", {}, `Bearer ${appToken}`);
-    await saveUserToken(credentialsPath, credentials.token, { ...credentials, appToken });
-    console.log(`Saved Socket Mode token to ${credentialsPath}. Restart slack-tui to connect.`);
+  } else {
+    console.log("\nNext: connect live events. Socket Mode and event subscriptions are already enabled.");
+  }
+  console.log(`Open ${appUrl}`);
+  console.log("Basic Information → App-Level Tokens → Generate Token and Scopes.");
+  console.log("Name it slack-tui-live, add connections:write, and generate the token.");
+  openBrowser(appUrl);
+  const appToken = await readSecret(signal, "App-level token (xapp-)");
+  if (!isAppToken(appToken)) throw new Error("Expected an xapp- app-level token.");
+  console.log("Verifying the live WebSocket connection…");
+  await verifySocketConnection(appToken, signal, credentials.appId);
+  // Re-read so a concurrent user-token refresh is not overwritten by stale credentials.
+  const latest = await loadCredentials({ ignoreInvalidAppToken: true });
+  if (!latest || latest.clientId !== credentials.clientId || latest.appId !== credentials.appId) {
+    throw new Error("The saved Slack connection changed during setup. Run bun run setup --socket again.");
+  }
+  await saveUserToken(credentialsPath, latest.token, { ...latest, appToken });
+  console.log(`Live connection verified. Saved app-level token to ${credentialsPath} (owner-only permissions).`);
+}
+
+async function setup() {
+  const options = setupOptions(process.argv.slice(2));
+  if (options.help) {
+    console.log("bun run setup [--replace] [--no-socket]\nbun run setup --socket\n\nDefault: create your Slack app, authorize your user, and configure and verify live Socket Mode events in one wizard.\nRequires a Slack app configuration access token and a browser on this machine. No tunnel or domain needed.\n\n--replace: connect a new app, including live events by default.\n--no-socket: skip Socket Mode setup (manual refresh only); does not remove an existing app-level token.\n--socket: add or repair Socket Mode for the existing connection; does not create an app.\n\nIf user authorization is already saved but Socket Mode is missing, plain setup resumes the live-events step.");
     return;
   }
-  if (process.argv.includes("--help")) {
-    console.log("bun run setup [--replace | --socket]\nCreates your own Slack app and authorizes it using PKCE and a localhost callback.\nRequires a Slack app configuration access token and a browser on this machine. No tunnel or domain needed.\n--replace: replace an existing SLACK_USER_TOKEN after successful authorization.\n--socket: configure live events for an existing app using a masked app-level token prompt.");
+  const existing = options.replace ? undefined : await loadCredentials({ ignoreInvalidAppToken: options.socket });
+  const action = setupAction(options, existing);
+  if (action === "ready") {
+    console.log("Slack is already configured. Run bun start, bun run setup --socket to repair live events, or bun run setup --replace to connect a new app.");
     return;
-  }
-  if (process.argv.slice(2).some(arg => arg !== "--replace")) throw new Error("Unknown option. Run bun run setup --help.");
-  if (!process.argv.includes("--replace") && await loadCredentials()) {
-    throw new Error("A Slack token is already configured. Run bun start, or bun run setup --replace to connect a new app.");
   }
   const controller = new AbortController();
   const cancel = () => controller.abort();
@@ -95,6 +117,11 @@ async function setup() {
   let app: App | undefined;
   let saved = false;
   try {
+    if (action === "socket") {
+      await setupSocket(existing!, signal);
+      console.log("Setup complete. Run bun start (or restart slack-tui) and look for LIVE in the title.");
+      return;
+    }
     console.log("This wizard will create the Slack app for you. Do not click Create New App.");
     console.log("Run this command on the same machine as your browser. Setup uses a local OAuth callback.");
     console.log("\nFirst, give the wizard permission to create an app in your workspace:");
@@ -108,14 +135,13 @@ async function setup() {
     openBrowser("https://api.slack.com/apps");
     const configToken = await readSecret(signal);
     if (!configToken) throw new Error("No configuration token supplied.");
-    const manifest = Bun.YAML.parse(await Bun.file(new URL("slack-app.yaml", root)).text()) as Manifest;
+    const manifest = setupManifest(Bun.YAML.parse(await Bun.file(new URL("slack-app.yaml", root)).text()) as Manifest, options);
     callback = startCallback();
     const redirect = `http://localhost:${callback.port}/oauth/callback`;
     const pkce = createPKCE();
     console.log(`Listening for Slack authorization at ${redirect}`);
     manifest.oauth_config.redirect_urls = [redirect];
     manifest.oauth_config.pkce_enabled = true;
-    manifest.settings = { ...manifest.settings, token_rotation_enabled: false };
     console.log("Creating app with the permissions in slack-app.yaml…");
     app = await slackRequest<App>("apps.manifest.create", { manifest: JSON.stringify(manifest) }, `Bearer ${configToken}`, signal);
     if (!app.app_id || !app.credentials?.client_id) throw new Error("Slack returned incomplete app credentials.");
@@ -127,10 +153,22 @@ async function setup() {
     if (result.error) throw new Error("Slack authorization was declined or requires administrator approval.");
     const credentials = await exchangeUserToken(app, result.code!, redirect, manifest.oauth_config.scopes.user, pkce.verifier, signal);
     const identity = await slackRequest<{ team: string; user: string }>("auth.test", {}, `Bearer ${credentials.token}`, signal);
+    credentials.appId = app.app_id;
     await saveUserToken(credentialsPath, credentials.token, { ...credentials, appToken: "" });
     saved = true;
     console.log(`Connected to ${identity.team} as ${identity.user}. Saved credentials to ${credentialsPath} (owner-only permissions).`);
-    console.log("Run bun run setup --socket to configure live events, then bun start.");
+    await callback.stop();
+    callback = undefined;
+    if (!options.noSocket) {
+      try { await setupSocket(credentials, signal, true); }
+      catch (error) {
+        console.log("User authorization is saved. Run bun run setup again to finish live events without creating another app.");
+        throw error;
+      }
+      console.log("Setup complete. Run bun start and look for LIVE in the title.");
+    } else {
+      console.log("Setup complete; Socket Mode was skipped. Run bun start. Run bun run setup later to add live events.");
+    }
   } finally {
     process.off("SIGINT", cancel);
     process.off("SIGTERM", cancel);
