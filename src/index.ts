@@ -203,6 +203,7 @@ function reactionIcon(name: string) {
 }
 let reactionPalette: BoxRenderable | undefined;
 function closeReactionPalette() {
+  if (reactionPalette?.parent) reactionPalette.parent.height = 1;
   reactionPalette?.destroyRecursively();
   reactionPalette = undefined;
 }
@@ -211,7 +212,9 @@ function toggleReactionPalette(message: Message, picker: BoxRenderable, notice: 
   closeReactionPalette();
   if (wasOpen) return;
   const palette = new BoxRenderable(renderer, {
-    flexDirection: "row", flexWrap: "wrap", flexShrink: 1, minWidth: 6, alignSelf: "flex-start", maxWidth: "100%",
+    position: "absolute", left: 3, top: 0, zIndex: 10,
+    flexDirection: "row", flexWrap: "wrap",
+    width: Math.max(6, Math.min(42, renderer.width - picker.x - 4)),
     border: true, borderStyle: "single", borderColor: "#686868", backgroundColor: "#272735FF",
   });
   reactionPalette = palette;
@@ -223,6 +226,15 @@ function toggleReactionPalette(message: Message, picker: BoxRenderable, notice: 
       void react(message, name, !mine, notice);
     }, { background: "#272735FF", hover: "#505064FF", foreground: "#e0def4" }));
   }
+  scroll.afterLayout(() => {
+    if (reactionPalette !== palette) return;
+    // Absolute children don't reserve scrollable space. Keep the + at the top
+    // of its row while making room for the popup's measured height.
+    picker.height = palette.height;
+    scroll.afterLayout(() => {
+      if (reactionPalette === palette) scroll.scrollChildIntoView(palette);
+    });
+  });
 }
 const pendingReactions = new Set<string>();
 async function react(message: Message, name: string, add: boolean, notice: TextRenderable) {
@@ -831,7 +843,7 @@ function renderMessages() {
           { background: "#272735FF", hover: "#505064FF", foreground: "#e0def4" }));
       }
       const picker = new BoxRenderable(renderer, {
-        flexDirection: "row", flexShrink: 1, minWidth: 0, maxWidth: "100%", columnGap: 1,
+        flexDirection: "row", width: 2, height: 1, flexShrink: 0, overflow: "visible",
       });
       reactions.add(picker);
       picker.add(new ImageRenderable(renderer, {
