@@ -21,6 +21,7 @@ import { messageSelectionText } from "./message-selection";
 import { restoreDraft } from "./drafts";
 import { lastConversation } from "./last-conversation";
 import { messageContent } from "./message-content";
+import { connectLive, applyLiveEvent, eventChannel, isNewMessage, type LiveEvent } from "./live";
 
 const demo = process.argv.includes("--demo");
 let settingsLoadError = "";
@@ -483,10 +484,12 @@ async function refreshUnread() {
     for (const channel of channels) {
       if (closed) break;
       const cursor = locallyRead.get(channel.id);
+      const revision = liveRevision;
       const unread = await chat.unread(channel.id, cursor);
       if (closed) break;
       // A history load completed while this request was in flight.
-      if (cursor === locallyRead.get(channel.id)) {
+      if (cursor === locallyRead.get(channel.id)
+        && !liveJournal.some(item => item.revision > revision && eventChannel(item.event) === channel.id)) {
         channel.unread = unread;
         menu.requestRender();
       }
@@ -540,8 +543,117 @@ let copyQueue = Promise.resolve();
 let copyGeneration = 0;
 let readingClipboard = false;
 let pasteGeneration = 0;
+let live: ReturnType<typeof connectLive> | undefined;
+let liveRevision = 0;
+const liveJournal: { revision: number; event: LiveEvent }[] = [];
+let liveDirty = false;
+let loadingHistory = false;
+let liveTimer: ReturnType<typeof setTimeout> | undefined;
+let liveReadTimer: ReturnType<typeof setTimeout> | undefined;
+let resyncTimer: ReturnType<typeof setTimeout> | undefined;
+let syncingLive = false;
+const discoveringChannels = new Set<string>();
+function eventsSince(messages: Message[], channel: string, revision: number) {
+  for (const item of liveJournal) {
+    if (item.revision > revision && eventChannel(item.event) === channel) messages = applyLiveEvent(messages, item.event);
+  }
+  return messages;
+}
+function scheduleLiveRender() {
+  if (closed || liveTimer) return;
+  liveTimer = setTimeout(() => {
+    liveTimer = undefined;
+    if (!liveDirty || closed) return;
+    if (loadingHistory || sending || editing || settingsOpen || helpOpen || composerExpanded
+      || reactionPalette || renderer.getSelection()?.getSelectedText()) {
+      scheduleLiveRender();
+      return;
+    }
+    const position = scroll.scrollTop;
+    const atBottom = position + scroll.viewport.height >= scroll.scrollHeight - 1;
+    liveDirty = false;
+    renderMessages();
+    scroll.scrollTo(atBottom ? Infinity : position);
+    if (atBottom && selected) {
+      if (liveReadTimer) clearTimeout(liveReadTimer);
+      const channel = selected;
+      const latest = currentMessages.at(-1)?.ts;
+      liveReadTimer = setTimeout(() => {
+        liveReadTimer = undefined;
+        if (closed || selected !== channel || loadingHistory || editing || helpOpen || settingsOpen || composerExpanded
+          || scroll.scrollTop + scroll.viewport.height < scroll.scrollHeight - 1 || !latest) return;
+        readLocally(channel, [{ ts: latest }]);
+        void chat.markRead(channel.id, latest).catch(() => report("Live messages received; Slack read update failed. Ctrl+R to retry."));
+      }, 600);
+    }
+  }, 150);
+}
+function receiveLive(event: LiveEvent) {
+  if (closed) return;
+  const id = eventChannel(event);
+  if (!id) return;
+  liveJournal.push({ revision: ++liveRevision, event });
+  if (liveJournal.length > 2000) liveJournal.shift();
+  const incoming = isNewMessage(event);
+  const channel = allChannels.find(channel => channel.id === id);
+  if (channel && incoming) {
+    if (event.user !== ownUserId) channel.unread = true;
+    // A message makes a dormant/closed conversation relevant again.
+    channel.properties = { ...channel.properties, is_dormant: false };
+    if (channel.is_im || channel.is_mpim) channel.is_open = true;
+    updateSidebar(menu.getSelectedOption()?.value?.id);
+    if (event.user !== ownUserId && selected?.id !== id) report(`New message · ${channelName(channel, chat.users)}`);
+  } else if (!channel && incoming && !discoveringChannels.has(id)) {
+    discoveringChannels.add(id);
+    void chat.conversation(id).then(channel => {
+      if (closed || allChannels.some(item => item.id === id)) return;
+      channel.unread = event.user !== ownUserId;
+      channel.properties = { ...channel.properties, is_dormant: false };
+      allChannels.push(channel);
+      allChannels.sort((a, b) => Number(!!a.is_im) - Number(!!b.is_im) || channelName(a, chat.users).localeCompare(channelName(b, chat.users)));
+      updateSidebar(menu.getSelectedOption()?.value?.id);
+    }).catch(() => report("New conversation received, but its details could not be loaded."))
+      .finally(() => discoveringChannels.delete(id));
+  }
+  if (selected?.id === id) {
+    currentMessages = applyLiveEvent(currentMessages, event);
+    liveDirty = true;
+    scheduleLiveRender();
+  }
+}
+// Catch up the open conversation after initial connection or reconnection.
+// Events arriving during the HTTP request are replayed over its snapshot.
+function scheduleLiveResync(delay = 500) {
+  if (closed || resyncTimer) return;
+  resyncTimer = setTimeout(() => {
+    resyncTimer = undefined;
+    void resyncLive();
+  }, delay);
+}
+async function resyncLive() {
+  if (closed || syncingLive || !selected) return;
+  if (loadingHistory || sending || editing || pendingReactions.size) { scheduleLiveResync(); return; }
+  syncingLive = true;
+  const channel = selected;
+  const request = generation;
+  const revision = liveRevision;
+  try {
+    const result = await chat.history(channel.id);
+    if (closed || request !== generation || selected !== channel) return;
+    currentMessages = eventsSince(result, channel.id, revision);
+    liveDirty = true;
+    scheduleLiveRender();
+  } catch {
+    report("Live catch-up delayed; retrying automatically.");
+    scheduleLiveResync(15_000);
+  } finally { syncingLive = false; }
+}
 renderer.once("destroy", () => {
   closed = true;
+  if (liveTimer) clearTimeout(liveTimer);
+  if (liveReadTimer) clearTimeout(liveReadTimer);
+  if (resyncTimer) clearTimeout(resyncTimer);
+  void live?.stop().catch(() => {});
   imageDrafts.clear();
   void (copyClipboard ?? clipboard)?.dispose().catch(() => {});
 });
@@ -763,18 +875,21 @@ async function load(channel: Channel) {
   currentMessages = [];
   showMessageStatus("Loading…");
   const request = ++generation;
+  const revision = liveRevision;
+  loadingHistory = true;
+  liveDirty = false;
   report("Loading recent messages…");
   try {
     const result = await chat.history(channel.id);
     if (closed || request !== generation) return;
-    currentMessages = result;
-    readLocally(channel, result);
+    currentMessages = eventsSince(result, channel.id, revision);
+    readLocally(channel, currentMessages);
     renderMessages();
     scroll.scrollTo(Infinity);
-    report(`${result.length} recent messages · Refresh with Ctrl+R`);
+    report(`${currentMessages.length} recent messages · ${live ? "Live events enabled" : "Ctrl+R to refresh · bun run setup --socket for live events"}`);
     try { lastOpened?.save(channel.id); }
     catch (error) { report(`Could not remember conversation: ${String(error)}`); }
-    const latest = result.reduce<string | undefined>((cursor, message) => laterTimestamp(cursor, message.ts), undefined);
+    const latest = currentMessages.reduce<string | undefined>((cursor, message) => laterTimestamp(cursor, message.ts), undefined);
     if (latest) {
       try {
         await chat.markRead(channel.id, latest);
@@ -791,6 +906,8 @@ async function load(channel: Channel) {
     if (closed || request !== generation) return;
     showMessageStatus("Unable to load history. Ctrl+R to retry.");
     report(String(error));
+  } finally {
+    if (request === generation) loadingHistory = false;
   }
 }
 search.on("input", () => updateSidebar());
@@ -806,13 +923,14 @@ async function sendMessage() {
   const channel = selected;
   const original = composer.plainText;
   const request = ++generation; // A pending history response must not overwrite this send.
+  loadingHistory = false;
   sending = true;
   report(image ? "Uploading image and sending caption…" : "Sending…");
   try {
     const message = await chat.send(channel.id, text, image);
     if (closed) return;
     if (request === generation) {
-      currentMessages.push(message);
+      currentMessages = applyLiveEvent(currentMessages, { ...message, type: "message" });
       readLocally(channel, currentMessages);
       renderMessages();
       scroll.scrollTo(Infinity);
@@ -824,7 +942,8 @@ async function sendMessage() {
     drafts.set(channel.id, composer.plainText);
     if (imageDrafts.get(channel.id) === image) imageDrafts.delete(channel.id);
     updateAttachment();
-    report("Sent · Ctrl+R to fetch incoming messages");
+    report(live ? "Sent" : "Sent · Ctrl+R to fetch incoming messages");
+    if (live && image) scheduleLiveResync();
   } catch (error) {
     report(String(error).includes("missing_scope")
       ? "Image upload needs files:write under User Token Scopes. Add it in Slack app settings and reinstall/reauthorize. Draft kept."
@@ -927,6 +1046,23 @@ try {
     title.content = ` slack-tui · ${identity.team} · ${identity.user}${demo ? " · DEMO" : ""}`;
     channels.sort((a, b) => Number(!!a.is_im) - Number(!!b.is_im) || channelName(a, chat.users).localeCompare(channelName(b, chat.users)));
     allChannels = channels;
+    if (!demo && credentials?.appToken) {
+      live = connectLive(credentials.appToken, identity.team_id, identity.user_id, {
+        event: receiveLive,
+        state(state) {
+          if (closed) return;
+          title.content = ` slack-tui · ${identity.team} · ${identity.user} · ${state === "live" ? "LIVE" : state}`;
+          if (state === "live") {
+            scheduleLiveResync();
+            void refreshUnread();
+          } else if (state === "offline") {
+            report("Live connection offline. Check Socket Mode/app token; Ctrl+R still works.");
+          }
+        },
+      });
+    } else if (!demo) {
+      title.content = ` slack-tui · ${identity.team} · ${identity.user} · manual refresh`;
+    }
     lastOpened = lastConversation(identity.team_id, identity.user_id);
     let previousId: string | undefined;
     try { previousId = lastOpened.read(); }

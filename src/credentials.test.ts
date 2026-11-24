@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadCredentials, parseCredentialsFile } from "./credentials";
-import { saveUserToken } from "./oauth";
+import { saveUserToken, updateEnv } from "./oauth";
 
 test("legacy credentials migrate outside project and preserve unrelated environment settings", async () => {
   const dir = await mkdtemp(join(tmpdir(), "slack-tui-migration-"));
@@ -37,4 +37,14 @@ test("credential parsing accepts quoted values and rejects malformed token/expir
   expect(parseCredentialsFile('SLACK_USER_TOKEN="xoxp-test" # comment\n')?.token).toBe("xoxp-test");
   expect(() => parseCredentialsFile("SLACK_USER_TOKEN=invalid")).toThrow("Invalid Slack user token");
   expect(() => parseCredentialsFile("SLACK_USER_TOKEN=xoxp-test\nSLACK_TOKEN_EXPIRES_AT=oops")).toThrow("expiry");
+});
+
+test("Socket Mode credentials survive user token refresh and can be removed when replacing the app", () => {
+  const file = "SLACK_USER_TOKEN=xoxp-old\nSLACK_APP_TOKEN=xapp-example\n";
+  expect(parseCredentialsFile(file)?.appToken).toBe("xapp-example");
+  const refreshed = updateEnv(file, "xoxp-new", { token: "xoxp-new", clientId: "1.2" });
+  expect(parseCredentialsFile(refreshed)?.appToken).toBe("xapp-example");
+  const replaced = updateEnv(refreshed, "xoxp-other", { token: "xoxp-other", appToken: "" });
+  expect(parseCredentialsFile(replaced)?.appToken).toBeUndefined();
+  expect(() => parseCredentialsFile("SLACK_USER_TOKEN=xoxp-test\nSLACK_APP_TOKEN=xoxb-wrong")).toThrow("Invalid Slack app token");
 });

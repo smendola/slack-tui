@@ -20,8 +20,17 @@ oauth_config:
       - users:read
       - chat:write
       - reactions:write
+      - reactions:read
       - files:write
       - files:read
 settings:
   org_deploy_enabled: false
-  socket_mode_enabled: false
+  socket_mode_enabled: true
+  event_subscriptions:
+    user_events:
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+      - reaction_added
+      - reaction_removed

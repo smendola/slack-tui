@@ -41,6 +41,7 @@ export interface Chat {
   avatars: Map<string, string>;
   connect(): Promise<{ team: string; user: string; team_id: string; user_id: string }>;
   channels(): Promise<Channel[]>;
+  conversation(id: string): Promise<Channel>;
   history(channel: string): Promise<Message[]>;
   unread(channel: string, locallyRead?: string): Promise<boolean | undefined>;
   markRead(channel: string, ts: string): Promise<void>;
@@ -141,6 +142,10 @@ export class Slack implements Chat {
   async history(channel: string) {
     const data = await this.call<{ messages: Message[] }>("conversations.history", { channel, limit: 50 });
     return data.messages.toReversed();
+  }
+  async conversation(id: string) {
+    const data = await this.call<{ channel: Channel }>("conversations.info", { channel: id });
+    return data.channel;
   }
   async presence(user: string): Promise<Presence | undefined> {
     try {
@@ -333,6 +338,7 @@ export class Demo implements Chat {
   ]);
   async connect() { return { team: "Offline demo", user: "You", team_id: "demo", user_id: "you" }; }
   async channels() { return [{ id: "general", name: "general" }, { id: "dev", name: "dev" }, { id: "dm", is_im: true, user: "alice" }]; }
+  async conversation(id: string): Promise<Channel> { return (await this.channels()).find(channel => channel.id === id) ?? { id }; }
   async history(channel: string) { return [...(this.messages.get(channel) ?? [])]; }
   async setReaction(channel: string, ts: string, name: string, add: boolean) {
     const message = this.messages.get(channel)?.find(message => message.ts === ts);

@@ -166,10 +166,45 @@ Presence is checked at startup, when switching to DMs, and with **Ctrl+R**.
 Checks run gradually in the background; they are snapshots, not live updates.
 The existing `users:read` permission covers presence—no extra scopes are needed.
 
+## Live messages (Socket Mode)
+
+Slack can push messages over a WebSocket—no polling, public server or tunnel.
+To enable this on your existing Slack app:
+
+1. Open [your Slack app settings](https://api.slack.com/apps) and select the
+   **same app that issued your saved user token**.
+2. Enable **Socket Mode**.
+3. Under **Event Subscriptions**, enable events and add these under
+   **Subscribe to events on behalf of users**:
+   `message.channels`, `message.groups`, `message.im`, `message.mpim`,
+   `reaction_added`, `reaction_removed`.
+4. Add `reactions:read` under **OAuth & Permissions → User Token Scopes** if
+   missing. Save and reinstall/reauthorize when Slack requests it; update your
+   saved user token if it changes.
+5. Under **Basic Information → App-Level Tokens**, generate a token with
+   `connections:write`.
+6. Run **`bun run setup --socket`** and paste the `xapp-…` token into its masked
+   prompt. This adds `SLACK_APP_TOKEN` to the owner-only credentials file without
+   creating another Slack app. Restart slack-tui.
+
+New apps created from the manifest already enable Socket Mode and subscribe to
+these events; they still need the app-level token.
+
+The title shows **LIVE** when connected. Messages, edits, deletions and reactions
+update automatically; other conversations become bold on incoming messages.
+Updates preserve drafts and scroll position, and wait to redraw while you select
+text, edit a message, or use another screen. Visible messages at the bottom are
+marked read. Socket Mode reconnects automatically and catches up the open
+conversation's recent history. Ctrl+R remains available for manual reconciliation.
+Presence still uses explicit checks rather than a live subscription.
+
+Without an app-level token, the client remains usable with manual refresh.
+
 ## Unread status
 
-Unread conversations appear in **bold**. Status is checked in the background at
-startup and with **Ctrl+R**, prioritizing the visible sidebar. Slack requires
+Unread conversations appear in **bold**. Live messages update their indicators
+immediately. Status is also checked in the background at startup, after connecting,
+and with **Ctrl+R**, prioritizing the visible sidebar. Slack requires
 per-conversation lookups, so a large workspace can take several minutes to check.
 If Slack rate-limits the check, the status line reports it; use Ctrl+R to retry.
 
@@ -189,7 +224,7 @@ user token scope and reauthorization to add or remove reactions.
 
 ## Current limitations
 
-- **Refresh is manual:** press Ctrl+R to fetch incoming messages.
+- **Live events need setup:** without Socket Mode, press Ctrl+R to fetch incoming messages.
 - **Recent history only:** loads up to 50 messages per conversation.
 - **Basic formatting:** resolves mentions, links and bot attachment details,
   but does not yet render styled Markdown.

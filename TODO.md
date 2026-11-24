@@ -9,6 +9,8 @@ Keep this list updated as ideas come up and work is completed. Check off finishe
 
 ## Completed
 
+- [x] Receive live message/edit/reaction events through Slack Socket Mode, reconnect and catch up recent history, and preserve drafts/scroll position during updates.
+
 - [x] Show the DM participant’s name without `@` and their presence in the chat header. Show avatars in the DM list and header when profile photos are enabled.
 - [x] Add and remove emoji reactions from the inline message palette.
 - [x] Edit your sent messages without disturbing the composer draft.
