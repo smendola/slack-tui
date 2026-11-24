@@ -1,3 +1,4 @@
+// Agent sessions: OC:x13-cachy:sal:ses_df0a63b8effesGcNc4BLpO6Hq5 Edited
 // Agent sessions: OC:x13-cachy:sal:ses_df1a0a3d0ffezEfNl4eWrA0klm Edited
 // Agent sessions: OC:x13-cachy:sal:ses_df1c1ceedffe0p5mflr3l2vNvR Edited
 // Agent sessions: OC:x13-cachy:sal:ses_df58f4884ffeQ73n6oD4HRDj22 Edited
@@ -7,7 +8,7 @@ import {
   StyledText, bg, fg, BorderChars, ImageRenderable, NativeImage, createHostClipboard, type HostClipboardService,
   createClipboard, createRendererClipboardAdapter, type ClipboardService, type Selection,
 } from "@opentui/core";
-import { Slack, Demo, channelName, displayText, isSidebarActive, laterTimestamp, updateReaction, type Channel, type Message } from "./slack";
+import { Slack, Demo, channelName, displayText, isSidebarActive, laterTimestamp, messageText, updateReaction, type Channel, type Message } from "./slack";
 import { ChannelSelect } from "./channel-select";
 import { tokenProvider } from "./oauth";
 import { credentialsPath } from "./config-paths";
@@ -399,6 +400,59 @@ async function react(message: Message, name: string, add: boolean, notice: TextR
 }
 let editing: { channel: string; ts: string; inThread: boolean } | undefined;
 let savingEdit = false;
+let deleteTarget: { channel: string; ts: string; inThread: boolean } | undefined;
+let deleting = false;
+const deleteScreen = new BoxRenderable(renderer, {
+  visible: false, flexGrow: 1, justifyContent: "center", alignItems: "center", focusable: true,
+});
+root.add(deleteScreen);
+const deleteDialog = new BoxRenderable(renderer, {
+  width: "90%", maxWidth: 64, border: true, borderColor: "#eb6f92", title: "Delete message?", paddingX: 1,
+});
+deleteScreen.add(deleteDialog);
+const deletePreview = new TextRenderable(renderer, { wrapMode: "word" });
+deleteDialog.add(deletePreview);
+const deleteActions = new BoxRenderable(renderer, { flexDirection: "row", columnGap: 1, height: 1 });
+deleteDialog.add(deleteActions);
+deleteActions.add(button(renderer, "Cancel", closeDelete));
+deleteActions.add(button(renderer, "Delete", () => void confirmDelete(), { background: "#eb6f92" }));
+function openDelete(message: Message, inThread: boolean) {
+  if (!selected || deleteTarget || !chat.canDelete(message)) return;
+  deleteTarget = { channel: selected.id, ts: message.ts, inThread };
+  const text = messageText(message, chat.users) || message.files?.[0]?.name || "(no text)";
+  const chars = Array.from(text);
+  const count = currentMessages.find(item => item.ts === message.ts)?.reply_count ?? message.reply_count ?? 0;
+  deletePreview.content = `${chars.slice(0, 100).join("").replace(/\s+/g, " ")}${chars.length > 100 ? "…" : ""}\n${count} ${count === 1 ? "reply" : "replies"}`;
+  body.visible = false;
+  deleteScreen.visible = true;
+  updateFooter();
+  queueMicrotask(() => { if (deleteTarget) deleteScreen.focus(); });
+}
+function closeDelete() {
+  if (deleting || !deleteTarget) return;
+  const { inThread } = deleteTarget;
+  deleteTarget = undefined;
+  deleteScreen.visible = false;
+  body.visible = true;
+  if (inThread && thread.open) thread.composer.focus(); else composer.focus();
+}
+async function confirmDelete() {
+  if (deleting || !deleteTarget) return;
+  const { channel, ts } = deleteTarget;
+  deleting = true;
+  try {
+    await chat.deleteMessage(channel, ts);
+    if (closed) return;
+    if (thread.channel === channel && thread.rootTs === ts) thread.close();
+    receiveLive({ type: "message", subtype: "message_deleted", channel, deleted_ts: ts });
+    report("Message deleted.");
+  } catch (error) {
+    report(`Message not deleted: ${String(error)}`);
+  } finally {
+    deleting = false;
+    if (!closed) closeDelete();
+  }
+}
 const editScreen = new BoxRenderable(renderer, {
   flexGrow: 1, minHeight: 0, flexDirection: "column", border: true, title: "Edit sent message", visible: false,
 });
@@ -551,7 +605,8 @@ function updateFooter() {
   // Help has its own navigation hints beneath the scroll area.
   footer.visible = !helpOpen;
   if (helpOpen) return;
-  if (editing) footer.content = " Ctrl+S: save edit · Enter: newline · Esc: cancel";
+  if (deleteTarget) footer.content = " Y: delete · Esc/N: cancel";
+  else if (editing) footer.content = " Ctrl+S: save edit · Enter: newline · Esc: cancel";
   else if (settingsOpen) footer.content = " Space/Enter: toggle · Esc: back · F1: help";
   else if (search.focused) footer.content = " Type a name · ↑↓: choose · Enter: open · Esc: clear · F1: help";
   else if (thread.composer.focused) {
@@ -920,6 +975,7 @@ function renderMessages() {
   if (!currentMessages.length) { showMessageStatus("No messages yet."); return; }
   renderMessageList(currentMessages, messages);
 }
+const messageActionColors = { background: "#272735FF", hover: "#505064FF", foreground: "#9ccfd8" };
 function renderMessageList(items: Message[], messages: BoxRenderable, inThread = false) {
   let previousDay: string | undefined;
   const currentYear = new Date().getFullYear();
@@ -950,14 +1006,18 @@ function renderMessageList(items: Message[], messages: BoxRenderable, inThread =
     const header = new BoxRenderable(renderer, { flexDirection: "row", flexShrink: 0, flexWrap: "wrap" });
     textColumn.add(header);
     header.add(new TextRenderable(renderer, {
-      wrapMode: "word",
+      wrapMode: "word", marginRight: 1,
       content: new StyledText([bg("#444444")(fg("#b8b8b8")(` ${name}  ${time} `))]),
     }));
     if (ownUserId && message.user === ownUserId && message.text && !message.files?.some(file => file.previewBytes)) {
-      header.add(new TextRenderable(renderer, {
-        content: " ✎ ", fg: "#9ccfd8", selectable: false,
-        onMouseDown(event) { if (event.button === 0) { event.stopPropagation(); openEdit(message, inThread); } },
-      }));
+      header.add(button(renderer, "✎", () => openEdit(message, inThread), messageActionColors));
+    }
+    if (chat.canDelete(message)) {
+      // Use the base trash glyph: terminals disagree on the width of its emoji variant.
+      const trash = button(renderer, "🗑", () => openDelete(message, inThread), messageActionColors);
+      trash.width = 4;
+      trash.flexShrink = 0;
+      header.add(trash);
     }
     textColumn.add(new TextRenderable(renderer, {
       width: "100%", flexShrink: 0, fg: "#e0def4", wrapMode: "word",
@@ -965,7 +1025,7 @@ function renderMessageList(items: Message[], messages: BoxRenderable, inThread =
     }));
     for (const source of images) {
       const label = new TextRenderable(renderer, {
-        content: `[image: ${displayText(source.label, chat.users)}] Loading…`,
+        content: "Loading image…",
         fg: "#908caa", width: "100%", flexShrink: 0, wrapMode: "word",
       });
       textColumn.add(label);
@@ -976,11 +1036,12 @@ function renderMessageList(items: Message[], messages: BoxRenderable, inThread =
           if (closed || row.isDestroyed) return;
           aspect = loaded.height / Math.max(1, loaded.width);
           resizeImage();
-          label.content = displayText(source.label, chat.users);
+          label.visible = false;
         },
         onError: () => {
           if (closed || row.isDestroyed) return;
           image.visible = false;
+          label.visible = true;
           label.content = `[image: ${displayText(source.label, chat.users)}] Preview unavailable`;
         },
       });
@@ -1020,8 +1081,7 @@ function renderMessageList(items: Message[], messages: BoxRenderable, inThread =
         },
       }));
       if (!inThread) {
-        reactions.add(button(renderer, threadLabel(message), () => openThread(message),
-          { background: "#272735FF", hover: "#505064FF", foreground: "#9ccfd8" }));
+        reactions.add(button(renderer, threadLabel(message), () => openThread(message), messageActionColors));
       }
       textColumn.add(reactions);
       textColumn.add(notice);
@@ -1159,6 +1219,12 @@ async function reloadApp() {
   process.exit(RELOAD_EXIT_CODE);
 }
 renderer.keyInput.on("keypress", key => {
+  if (deleteTarget) {
+    key.preventDefault();
+    if (key.name === "escape" || key.name === "n") closeDelete();
+    else if (key.name === "y" && !key.ctrl && !key.meta) void confirmDelete();
+    return;
+  }
   if (key.shift && key.name === "f5") {
     key.preventDefault();
     void reloadApp();

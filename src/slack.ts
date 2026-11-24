@@ -1,3 +1,4 @@
+// Agent sessions: OC:x13-cachy:sal:ses_df0a63b8effesGcNc4BLpO6Hq5 Edited
 // Agent sessions: OC:x13-cachy:sal:ses_df1c1ceedffe0p5mflr3l2vNvR Edited
 import { type ImageAttachment } from "./attachment";
 import { downloadMessageImage, type MessageImage } from "./message-images";
@@ -50,6 +51,8 @@ export interface Chat {
   presence(user: string): Promise<Presence | undefined>;
   send(channel: string, text: string, image?: ImageAttachment, threadTs?: string): Promise<Message>;
   edit(channel: string, ts: string, text: string): Promise<void>;
+  canDelete(message: Message): boolean;
+  deleteMessage(channel: string, ts: string): Promise<void>;
   setReaction(channel: string, ts: string, name: string, add: boolean): Promise<void>;
   readImage(image: MessageImage): Promise<Uint8Array>;
 }
@@ -69,7 +72,7 @@ export class Slack implements Chat {
     const wait = Math.ceil(((this.blockedUntil.get(method) ?? 0) - Date.now()) / 1000);
     if (wait > 0) throw new Error(`Rate limited: retry ${method} in ${wait}s.`);
     const form = method.startsWith("files.");
-    const write = method === "chat.postMessage" || method === "chat.update" || method.startsWith("reactions.") || method === "conversations.mark" || form;
+    const write = method === "chat.postMessage" || method === "chat.update" || method === "chat.delete" || method.startsWith("reactions.") || method === "conversations.mark" || form;
     const url = new URL(`https://slack.com/api/${method}`);
     if (!write) {
       for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
@@ -218,6 +221,14 @@ export class Slack implements Chat {
   async edit(channel: string, ts: string, text: string) {
     await this.call("chat.update", { channel, ts, text });
   }
+  canDelete(message: Message) {
+    return !!this.userId && message.user === this.userId && !message.bot_id
+      && (!this.grantedScopes || this.grantedScopes.has("chat:write"))
+      && !message.files?.some(file => file.previewBytes);
+  }
+  async deleteMessage(channel: string, ts: string) {
+    await this.call("chat.delete", { channel, ts });
+  }
   async setReaction(channel: string, ts: string, name: string, add: boolean) {
     await this.call(add ? "reactions.add" : "reactions.remove", { channel, timestamp: ts, name });
   }
@@ -362,6 +373,20 @@ export class Demo implements Chat {
     message.text = text;
   }
   async markRead(_channel: string, _ts: string) {}
+  canDelete(message: Message) { return message.user === "you" && !message.bot_id; }
+  async deleteMessage(channel: string, ts: string) {
+    const messages = this.messages.get(channel) ?? [];
+    const message = messages.find(item => item.ts === ts);
+    if (!message || !this.canDelete(message)) throw new Error("Cannot delete this message.");
+    const remaining = messages.filter(item => item.ts !== ts);
+    this.messages.set(channel, remaining);
+    const parent = remaining.find(item => item.ts === message.thread_ts);
+    if (parent) {
+      const replies = remaining.filter(item => item.thread_ts === parent.ts && item.ts !== parent.ts);
+      parent.reply_count = replies.length;
+      parent.latest_reply = replies.at(-1)?.ts;
+    }
+  }
   async presence(user: string): Promise<Presence> { return user === "alice" ? "active" : "away"; }
   async unread(channel: string, locallyRead?: string) {
     const latest = this.messages.get(channel)?.at(-1)?.ts;

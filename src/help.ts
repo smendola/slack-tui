@@ -29,6 +29,7 @@ const guide = `## Navigation
 - **Enter** sends the message and any attached image. **Shift+Enter** expands the composer and inserts a newline. If your terminal doesn't support it, **double-click** the composer to expand it. **Esc** collapses it.
 - Type **@** and a name to mention someone. Choose with **↑ / ↓**, then **Enter** or **Tab**, or click a match. **Esc** cancels.
 - Click **✎** beside a message you sent to edit it. **Ctrl+S** saves and **Esc** cancels. Your composer draft is kept.
+- Click **🗑** to preview a message and its reply count. Choose **Delete** or press **Y** to confirm; **Esc** cancels.
 - Click the **smiley-plus icon** to open the emoji palette. Use the arrows and **Space / Enter** to select, or click an emoji. **Esc** or clicking outside closes the palette. Click an existing reaction to toggle yours; ✓ means you've reacted.
 - Click **↳ Reply** or a **reply count** to open a thread. Wide terminals show a resizable side panel; narrow terminals show a **Back** button.
 - Threads have their own drafts, mentions, and attachments. **Enter** in the thread composer replies only to the thread. **Ctrl+R** refreshes the focused thread. **Esc** closes a picker or collapses an expanded composer before closing the thread.
