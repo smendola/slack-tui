@@ -2,12 +2,14 @@
 import { TextRenderable, type RenderContext } from "@opentui/core";
 
 export const buttonBackground = "#c4c4c4";
-export function button(context: RenderContext, label: string, action: () => void) {
+export function button(context: RenderContext, label: string, action: () => void,
+  colors: { background?: string; hover?: string; foreground?: string } = {}) {
+  const background = colors.background ?? buttonBackground;
   return new TextRenderable(context, {
     content: ` ${label} `, height: 1, alignSelf: "flex-start", selectable: false,
-    bg: buttonBackground, fg: "#343434",
-    onMouseOver() { this.bg = "#ffffff"; },
-    onMouseOut() { this.bg = buttonBackground; },
+    bg: background, fg: colors.foreground ?? "#343434",
+    onMouseOver() { this.bg = colors.hover ?? "#ffffff"; },
+    onMouseOut() { this.bg = background; },
     onMouseDown(event) {
       if (event.button !== 0) return;
       event.stopPropagation();
