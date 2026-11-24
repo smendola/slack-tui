@@ -1,3 +1,20 @@
+import sharp from "sharp";
+
+/** Crop to the square avatar frame, then mask with antialiased transparent corners. */
+export async function roundAvatar(bytes: Uint8Array): Promise<Uint8Array> {
+  const image = sharp(bytes);
+  const { width, height } = await image.metadata();
+  if (!width || !height) throw new Error("Avatar has no dimensions");
+  const size = Math.min(width, height);
+  const radius = size * 0.25;
+  const mask = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">` +
+    `<rect width="${size}" height="${size}" rx="${radius}" ry="${radius}" fill="white"/></svg>`,
+  );
+  return image.resize(size, size, { fit: "cover" }).ensureAlpha()
+    .composite([{ input: mask, blend: "dest-in" }]).png().toBuffer();
+}
+
 /** Cache small public profile images for this session; no Slack credentials sent. */
 export class AvatarCache {
   private images = new Map<string, Promise<Uint8Array | undefined>>();
@@ -28,6 +45,6 @@ export class AvatarCache {
     const bytes = new Uint8Array(length);
     let offset = 0;
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-    return bytes;
+    return roundAvatar(bytes);
   }
 }

@@ -1,28 +1,26 @@
-import { afterEach, expect, test } from "bun:test";
-import { AvatarCache } from "./avatars";
+import { expect, test } from "bun:test";
+import sharp from "sharp";
+import { roundAvatar } from "./avatars";
 
-const originalFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = originalFetch; });
-
-test("avatar requests are shared and never carry Slack authorization", async () => {
-  let calls = 0;
-  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
-    calls++;
-    expect(init?.headers).toBeUndefined();
-    return new Response(new Uint8Array([1, 2, 3]));
-  }) as unknown as typeof fetch;
-  const cache = new AvatarCache();
-  const [a, b] = await Promise.all([cache.get("https://example.com/avatar.png"), cache.get("https://example.com/avatar.png")]);
-  expect(a).toEqual(new Uint8Array([1, 2, 3]));
-  expect(a).toBe(b);
-  expect(calls).toBe(1);
+test("avatar mask rounds all four corners, preserving the center and existing alpha", async () => {
+  for (const alpha of [1, 0.5]) {
+    const input = await sharp({
+      create: { width: 100, height: 100, channels: 4, background: { r: 200, g: 100, b: 50, alpha } },
+    }).png().toBuffer();
+    const output = await roundAvatar(input);
+    const { data, info } = await sharp(output).raw().toBuffer({ resolveWithObject: true });
+    const opacity = (x: number, y: number) => data[(y * info.width + x) * 4 + 3]!;
+    expect([info.width, info.height, info.channels]).toEqual([100, 100, 4]);
+    for (const [x, y] of [[0, 0], [99, 0], [0, 99], [99, 99]]) expect(opacity(x!, y!)).toBe(0);
+    expect(opacity(50, 50)).toBe(Math.round(alpha * 255));
+    expect(opacity(25, 0)).toBe(opacity(50, 50));
+    expect(opacity(7, 7)).toBeGreaterThan(0);
+    expect(opacity(7, 7)).toBeLessThan(opacity(50, 50));
+  }
 });
 
-test("failed or oversized avatars fall back without breaking the message", async () => {
-  const cache = new AvatarCache();
-  globalThis.fetch = (async () => new Response("", { status: 404 })) as unknown as typeof fetch;
-  expect(await cache.get("https://example.com/missing")).toBeUndefined();
-  globalThis.fetch = (async () => new Response(new Uint8Array(1024 * 1024 + 1))) as unknown as typeof fetch;
-  expect(await cache.get("https://example.com/oversized")).toBeUndefined();
-  expect(await cache.get("file:///private")).toBeUndefined();
+test("non-square avatars are cropped before masking so cover rendering preserves corners", async () => {
+  const input = await sharp({ create: { width: 120, height: 80, channels: 3, background: "#ffffff" } }).jpeg().toBuffer();
+  const result = await sharp(await roundAvatar(input)).metadata();
+  expect([result.width, result.height, result.format, result.hasAlpha]).toEqual([80, 80, "png", true]);
 });

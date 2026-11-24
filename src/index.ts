@@ -450,7 +450,7 @@ function updateHeading(channel: Channel) {
   if (url) void avatarCache.get(url).then(bytes => {
     if (!bytes || closed || fallback.isDestroyed) return;
     const photo = new ImageRenderable(renderer, {
-      width: 4, height: 2, position: "absolute", fit: "cover",
+      width: 4, height: 2, position: "absolute", fit: "fit",
       onLoad: () => { if (!fallback.isDestroyed) fallback.visible = false; },
       onError: () => { if (!fallback.isDestroyed) fallback.visible = true; },
     });
@@ -868,7 +868,7 @@ function renderMessages() {
       void avatarCache.get(url).then(bytes => {
         if (!bytes || closed || version !== messageRenderVersion) return;
         const avatar = new ImageRenderable(renderer, {
-          width: 4, height: 2, position: "absolute", top: 0, left: 0, fit: "cover",
+          width: 4, height: 2, position: "absolute", top: 0, left: 0, fit: "fit",
           onLoad: () => { if (!closed && version === messageRenderVersion) initialsFallback.visible = false; },
           onError: () => { if (!closed && version === messageRenderVersion) initialsFallback.visible = true; },
         });
